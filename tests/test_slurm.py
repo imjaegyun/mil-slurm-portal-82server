@@ -173,6 +173,33 @@ class AllocationValidationTests(unittest.TestCase):
                 {**G2_NODE, "free_gpus": 0},
             )
 
+    def test_waiting_request_can_use_node_capacity_above_current_free(self):
+        result = validate_allocation(
+            {
+                "gpu_count": 8,
+                "cpus": 128,
+                "memory_gb": 950,
+                "hours": 4,
+                "wait_for_resources": True,
+            },
+            {**G2_NODE, "free_gpus": 0, "cpu_idle": 0, "free_memory_mb": 0},
+        )
+        self.assertTrue(result["wait_for_resources"])
+        self.assertEqual(result["gpu_count"], 8)
+
+    def test_waiting_request_rejects_above_node_capacity(self):
+        with self.assertRaisesRegex(PortalError, "at most 8 GPUs"):
+            validate_allocation(
+                {
+                    "gpu_count": 9,
+                    "cpus": 8,
+                    "memory_gb": 64,
+                    "hours": 4,
+                    "wait_for_resources": True,
+                },
+                G2_NODE,
+            )
+
 
 class SlurmClientTests(unittest.TestCase):
     def setUp(self):
@@ -256,6 +283,23 @@ class SlurmClientTests(unittest.TestCase):
             any(Path(args[0]).name == "sbatch" for args, _ in self.runner.calls)
         )
 
+    def test_submit_allows_explicit_waiting_request_above_free(self):
+        result = self.client.submit_allocation(
+            {
+                "node_name": "n003",
+                "gpu_count": 8,
+                "cpus": 128,
+                "memory_gb": 950,
+                "hours": 4,
+                "wait_for_resources": True,
+            }
+        )
+        self.assertEqual(result["job_id"], "7001")
+        args = self.runner.calls[-1][0]
+        self.assertIn("--gres=gpu:a6000:8", args)
+        self.assertIn("--cpus-per-task=128", args)
+        self.assertIn("--mem=950G", args)
+
     def test_cancel_only_managed_job(self):
         result = self.client.cancel_allocation("7001")
         self.assertTrue(result["cancelled"])
@@ -273,6 +317,9 @@ class SlurmClientTests(unittest.TestCase):
         self.assertEqual(detail["request_limits"]["max_gpus"], 6)
         self.assertEqual(detail["request_limits"]["max_cpus"], 112)
         self.assertEqual(detail["request_limits"]["max_memory_gb"], 423)
+        self.assertEqual(detail["wait_limits"]["max_gpus"], 8)
+        self.assertEqual(detail["wait_limits"]["max_cpus"], 128)
+        self.assertEqual(detail["wait_limits"]["max_memory_gb"], 950)
         self.assertFalse(detail["gpu_slots"][3]["allocated"])
         self.assertEqual(detail["gpu_slots"][4]["job"]["user"], "ijg2603")
         self.assertEqual(detail["gpu_slots"][5]["job"]["id"], "7001")

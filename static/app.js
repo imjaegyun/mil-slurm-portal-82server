@@ -11,6 +11,7 @@ const state = {
   nodePartition: "",
   nodeSearch: "",
   nodeSort: "node",
+  requestMode: "available",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -98,6 +99,18 @@ function requestLimitsForNode(node) {
   };
 }
 
+function waitingLimitsForNode(node) {
+  const safeNumber = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+  };
+  return {
+    max_gpus: safeNumber(node.gpus),
+    max_cpus: safeNumber(node.cpus),
+    max_memory_gb: Math.floor((safeNumber(node.memory_mb) / 1024) * 0.95),
+  };
+}
+
 function nodeHasRequestCapacity(node) {
   const limits = requestLimitsForNode(node);
   return (
@@ -108,13 +121,21 @@ function nodeHasRequestCapacity(node) {
   );
 }
 
+function nodeCanQueue(node) {
+  const limits = waitingLimitsForNode(node);
+  return (
+    nodeAcceptsJobs(node) &&
+    limits.max_gpus >= 1 &&
+    limits.max_cpus >= 1 &&
+    limits.max_memory_gb >= 1
+  );
+}
+
 function nodeCapacityMessage(node) {
   const limits = requestLimitsForNode(node);
-  if (!nodeAcceptsJobs(node)) return "새 요청 불가";
-  if (limits.max_gpus < 1) return "여유 GPU 없음";
-  if (limits.max_cpus < 1) return "여유 CPU 없음";
-  if (limits.max_memory_gb < 1) return "여유 메모리 1 GB 미만";
-  return `${limits.max_gpus}/${node.gpus} GPU · ${limits.max_cpus}/${node.cpus} CPU 요청 가능`;
+  if (!nodeCanQueue(node)) return "새 요청 불가";
+  if (!nodeHasRequestCapacity(node)) return "현재 여유 부족 · 대기 가능";
+  return `${limits.max_gpus}/${node.gpus} GPU · ${limits.max_cpus}/${node.cpus} CPU 바로 사용`;
 }
 
 function visibleNodes(nodes) {
@@ -126,6 +147,12 @@ function visibleNodes(nodes) {
         return selected;
       }
       if (state.nodeMode === "available" && !nodeHasRequestCapacity(node)) {
+        return selected;
+      }
+      if (
+        state.nodeMode === "waiting" &&
+        !(nodeCanQueue(node) && !nodeHasRequestCapacity(node))
+      ) {
         return selected;
       }
       return true;
@@ -238,8 +265,11 @@ function renderRequestNodes(nodes) {
     const gpuLabel = formatGpuLabel(node.gpu_type);
     const selected = state.selectedNode?.node.name === node.name;
     const pending = state.pendingNode === node.name;
-    const limits = requestLimitsForNode(node);
-    const unavailable = !nodeHasRequestCapacity(node);
+    const waitingOnly = nodeCanQueue(node) && !nodeHasRequestCapacity(node);
+    const limits = waitingOnly
+      ? waitingLimitsForNode(node)
+      : requestLimitsForNode(node);
+    const unavailable = !nodeCanQueue(node);
     const card = createText(
       "button",
       `request-node-choice ${node.gpu_type === "h200" ? "h200-choice" : ""} ` +
@@ -288,7 +318,9 @@ function renderRequestNodes(nodes) {
 
     const availability = createText(
       "div",
-      `request-node-availability ${unavailable ? "unavailable" : ""}`,
+      `request-node-availability ${
+        unavailable ? "unavailable" : waitingOnly ? "waiting" : ""
+      }`,
       nodeCapacityMessage(node),
     );
 
@@ -303,7 +335,15 @@ function renderRequestNodes(nodes) {
 }
 
 function renderNodeDetail(data) {
-  const { node, summary, request_limits: limits, gpu_slots: gpuSlots, jobs } = data;
+  const {
+    node,
+    summary,
+    request_limits: limits,
+    wait_limits: providedWaitLimits,
+    gpu_slots: gpuSlots,
+    jobs,
+  } = data;
+  const waitLimits = providedWaitLimits || waitingLimitsForNode(node);
   state.currentNodeDetail = data;
   const requestButton = $("#node-request-button");
   const selected = state.selectedNode?.node.name === node.name;
@@ -312,12 +352,19 @@ function renderNodeDetail(data) {
     limits.max_gpus >= 1 &&
     limits.max_cpus >= 1 &&
     limits.max_memory_gb >= 1;
-  requestButton.disabled = !selected && !requestable;
+  const queueable =
+    nodeAcceptsJobs(node) &&
+    waitLimits.max_gpus >= 1 &&
+    waitLimits.max_cpus >= 1 &&
+    waitLimits.max_memory_gb >= 1;
+  requestButton.disabled = !selected && !queueable;
   requestButton.textContent = selected
     ? "선택 해제"
     : requestable
       ? "요청 노드로 선택"
-      : "현재 요청 가능한 자원 없음";
+      : queueable
+        ? "대기 요청 노드로 선택"
+        : "현재 요청 가능한 자원 없음";
   $("#node-detail-title").textContent = node.name;
   $("#node-detail-state").textContent = node.state;
   $("#node-detail-state").className = `state-badge ${node.state}`;
@@ -488,6 +535,7 @@ function clearNodeSelection({ closeDialog = false, announce = true } = {}) {
   const previousNode = state.selectedNode?.node.name;
   state.selectedNode = null;
   state.pendingNode = "";
+  state.requestMode = "available";
   $("#node-name").value = "";
   $("#selected-node-target").className = "selected-node-target empty";
   $("#selected-node-icon").textContent = "?";
@@ -499,6 +547,10 @@ function clearNodeSelection({ closeDialog = false, announce = true } = {}) {
     "노드의 파티션과 GPU 종류는 서버가 자동으로 확인합니다.";
   ["#gpu-count", "#cpus", "#memory"].forEach((selector) => {
     $(selector).removeAttribute("max");
+  });
+  document.querySelectorAll("[data-request-mode]").forEach((button) => {
+    button.disabled = true;
+    button.classList.remove("active");
   });
   const submitButton = $("#submit-allocation");
   submitButton.disabled = true;
@@ -512,37 +564,36 @@ function clearNodeSelection({ closeDialog = false, announce = true } = {}) {
   if (announce && previousNode) toast(`${previousNode} 선택을 해제했습니다.`);
 }
 
-function selectNodeForAllocation(
-  detail,
-  { closeDialog = true, scroll = true, announce = true } = {},
-) {
-  state.pendingNode = "";
-  const { node, summary, request_limits: limits } = detail;
-  const requestable =
+function setRequestMode(mode, { announce = false } = {}) {
+  if (!state.selectedNode) return false;
+  const { node, summary } = state.selectedNode;
+  const availableLimits =
+    state.selectedNode.request_limits || requestLimitsForNode(node);
+  const waitLimits =
+    state.selectedNode.wait_limits || waitingLimitsForNode(node);
+  const availableEnabled =
     nodeAcceptsJobs(node) &&
-    limits.max_gpus >= 1 &&
-    limits.max_cpus >= 1 &&
-    limits.max_memory_gb >= 1;
-  if (!requestable) {
-    if (state.selectedNode?.node.name === node.name) {
-      clearNodeSelection({ closeDialog, announce: false });
-    }
-    toast(`${node.name}에는 현재 요청 가능한 여유 자원이 없습니다.`, "error");
-    return false;
-  }
-  state.selectedNode = detail;
-  const gpuLabel = formatGpuLabel(detail.gpu_type);
-  $("#node-name").value = node.name;
-  $("#selected-node-target").classList.remove("empty");
-  $("#selected-node-target").classList.toggle("h200-target", detail.gpu_type === "h200");
-  $("#selected-node-icon").textContent = node.name.slice(-1);
-  $("#selected-node-kicker").textContent = `${node.partition.toUpperCase()} · ${gpuLabel}`;
-  $("#selected-node-name").textContent = node.name;
-  $("#selected-node-spec").textContent =
-    `${summary.free_gpus}/${summary.total_gpus} GPU available · ` +
-    `${limits.max_cpus}/${node.cpus} CPU · ${limits.max_memory_gb} GB requestable`;
-  $("#node-description").textContent =
-    `${node.name}의 현재 남은 자원까지만 요청할 수 있으며 제출 직전에 다시 확인합니다.`;
+    availableLimits.max_gpus >= 1 &&
+    availableLimits.max_cpus >= 1 &&
+    availableLimits.max_memory_gb >= 1;
+  const waitEnabled =
+    nodeAcceptsJobs(node) &&
+    waitLimits.max_gpus >= 1 &&
+    waitLimits.max_cpus >= 1 &&
+    waitLimits.max_memory_gb >= 1;
+  let nextMode = mode === "wait" ? "wait" : "available";
+  if (nextMode === "available" && !availableEnabled) nextMode = "wait";
+  if (nextMode === "wait" && !waitEnabled) return false;
+
+  state.requestMode = nextMode;
+  const limits = nextMode === "wait" ? waitLimits : availableLimits;
+  document.querySelectorAll("[data-request-mode]").forEach((button) => {
+    const buttonMode = button.dataset.requestMode;
+    button.disabled =
+      buttonMode === "available" ? !availableEnabled : !waitEnabled;
+    button.classList.toggle("active", buttonMode === nextMode);
+    button.setAttribute("aria-pressed", String(buttonMode === nextMode));
+  });
 
   $("#gpu-count").max = limits.max_gpus;
   $("#cpus").max = limits.max_cpus;
@@ -559,12 +610,66 @@ function selectNodeForAllocation(
     1,
     Math.min(Number($("#memory").value) || 1, limits.max_memory_gb),
   );
+
+  if (nextMode === "wait") {
+    $("#selected-node-spec").textContent =
+      `${limits.max_gpus} GPU · ${limits.max_cpus} CPU · ` +
+      `${limits.max_memory_gb} GB node capacity`;
+    $("#node-description").textContent =
+      `${node.name}의 전체 수용량 안에서 대기 Job을 제출합니다. 자원이 확보될 때까지 PENDING 상태입니다.`;
+  } else {
+    $("#selected-node-spec").textContent =
+      `${summary.free_gpus}/${summary.total_gpus} GPU available · ` +
+      `${limits.max_cpus}/${node.cpus} CPU · ${limits.max_memory_gb} GB requestable`;
+    $("#node-description").textContent =
+      `${node.name}의 현재 남은 자원까지만 요청하며 제출 직전에 다시 확인합니다.`;
+  }
+
   const submitButton = $("#submit-allocation");
   submitButton.disabled = false;
   submitButton.replaceChildren(
-    createText("span", "", "선택한 노드에 Job 제출"),
+    createText(
+      "span",
+      "",
+      nextMode === "wait" ? "선택한 노드에 대기 Job 제출" : "선택한 노드에 Job 제출",
+    ),
     createText("span", "", "↗"),
   );
+  updatePreview();
+  if (announce) {
+    toast(
+      nextMode === "wait"
+        ? "대기 요청 모드로 전환했습니다."
+        : "현재 여유 자원 모드로 전환했습니다.",
+    );
+  }
+  return true;
+}
+
+function selectNodeForAllocation(
+  detail,
+  { closeDialog = true, scroll = true, announce = true, mode = null } = {},
+) {
+  state.pendingNode = "";
+  const { node } = detail;
+  const queueable = nodeCanQueue(node);
+  if (!queueable) {
+    if (state.selectedNode?.node.name === node.name) {
+      clearNodeSelection({ closeDialog, announce: false });
+    }
+    toast(`${node.name}에는 현재 제출하거나 대기할 수 없습니다.`, "error");
+    return false;
+  }
+  state.selectedNode = detail;
+  const gpuLabel = formatGpuLabel(detail.gpu_type);
+  $("#node-name").value = node.name;
+  $("#selected-node-target").classList.remove("empty");
+  $("#selected-node-target").classList.toggle("h200-target", detail.gpu_type === "h200");
+  $("#selected-node-icon").textContent = node.name.slice(-1);
+  $("#selected-node-kicker").textContent = `${node.partition.toUpperCase()} · ${gpuLabel}`;
+  $("#selected-node-name").textContent = node.name;
+  const nextMode = mode || (nodeHasRequestCapacity(node) ? "available" : "wait");
+  setRequestMode(nextMode);
   document.querySelectorAll(".node-card").forEach((card) => {
     card.classList.toggle("selected-node-card", card.dataset.node === node.name);
   });
@@ -582,10 +687,18 @@ function syncSelectedNodeWithOverview(nodes) {
   if (!state.selectedNode) return;
   const selectedName = state.selectedNode.node.name;
   const latestNode = nodes.find((node) => node.name === selectedName);
-  if (!latestNode || !nodeHasRequestCapacity(latestNode)) {
+  if (!latestNode || !nodeCanQueue(latestNode)) {
     clearNodeSelection({ announce: false });
     toast(
       `${selectedName}의 여유 자원이 변경되어 노드 선택을 해제했습니다.`,
+      "error",
+    );
+    return;
+  }
+  if (state.requestMode === "available" && !nodeHasRequestCapacity(latestNode)) {
+    clearNodeSelection({ announce: false });
+    toast(
+      `${selectedName}의 현재 여유 자원이 소진되었습니다. 대기 요청으로 다시 선택할 수 있습니다.`,
       "error",
     );
     return;
@@ -595,6 +708,7 @@ function syncSelectedNodeWithOverview(nodes) {
       ...state.selectedNode,
       node: latestNode,
       request_limits: requestLimitsForNode(latestNode),
+      wait_limits: waitingLimitsForNode(latestNode),
       summary: {
         ...state.selectedNode.summary,
         total_gpus: latestNode.gpus,
@@ -602,7 +716,12 @@ function syncSelectedNodeWithOverview(nodes) {
         free_gpus: latestNode.free_gpus,
       },
     },
-    { closeDialog: false, scroll: false, announce: false },
+    {
+      closeDialog: false,
+      scroll: false,
+      announce: false,
+      mode: state.requestMode,
+    },
   );
 }
 
@@ -780,8 +899,9 @@ function updatePreview() {
   }
   const { node } = state.selectedNode;
   const timeLimit = $("#no-time-limit").checked ? "No limit" : `${$("#hours").value}h`;
+  const requestMode = state.requestMode === "wait" ? "Wait queue" : "Available now";
   $("#request-preview").textContent =
-    `${node.name} / ${node.partition} / ${$("#gpu-count").value} GPU / ` +
+    `${requestMode} / ${node.name} / ${node.partition} / ${$("#gpu-count").value} GPU / ` +
     `${$("#cpus").value} CPU / ${$("#memory").value} GB / ${timeLimit}`;
 }
 
@@ -843,6 +963,12 @@ $("#node-sort").addEventListener("change", (event) => {
 $("#node-search").addEventListener("input", (event) => {
   state.nodeSearch = event.target.value;
   renderFilteredNodeViews();
+});
+
+$("#request-mode-switch").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-request-mode]");
+  if (!button || button.disabled || !state.selectedNode) return;
+  setRequestMode(button.dataset.requestMode, { announce: true });
 });
 
 const navItems = Array.from(document.querySelectorAll(".nav-item"));
@@ -929,10 +1055,13 @@ $("#allocation-form").addEventListener("submit", async (event) => {
     cpus: Number($("#cpus").value),
     memory_gb: Number($("#memory").value),
     hours: unlimited ? 0 : Number($("#hours").value),
+    wait_for_resources: state.requestMode === "wait",
   };
   const timeSummary = unlimited ? "시간 제한 없이" : `${request.hours}시간 동안`;
+  const modeSummary =
+    state.requestMode === "wait" ? "대기 요청으로" : "현재 여유 자원에서";
   const summary =
-    `${node.name} (${node.partition})에서 ${request.gpu_count} GPU, ${request.cpus} CPU, ` +
+    `${modeSummary} ${node.name} (${node.partition})에 ${request.gpu_count} GPU, ${request.cpus} CPU, ` +
     `${request.memory_gb} GB를 ${timeSummary} 요청합니다. 계속할까요?`;
   if (!window.confirm(summary)) return;
 
@@ -955,7 +1084,15 @@ $("#allocation-form").addEventListener("submit", async (event) => {
     const hasSelection = Boolean(state.selectedNode);
     button.disabled = !hasSelection;
     button.replaceChildren(
-      createText("span", "", hasSelection ? "선택한 노드에 Job 제출" : "노드를 먼저 선택하세요"),
+      createText(
+        "span",
+        "",
+        hasSelection
+          ? state.requestMode === "wait"
+            ? "선택한 노드에 대기 Job 제출"
+            : "선택한 노드에 Job 제출"
+          : "노드를 먼저 선택하세요",
+      ),
       createText("span", "", "↗"),
     );
   }

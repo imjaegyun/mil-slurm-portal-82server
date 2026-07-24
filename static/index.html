@@ -179,6 +179,9 @@
             <button class="filter-mode active" type="button" data-node-mode="available">
               사용 가능
             </button>
+            <button class="filter-mode" type="button" data-node-mode="waiting">
+              대기 가능
+            </button>
             <button class="filter-mode" type="button" data-node-mode="all">
               전체 노드
             </button>
@@ -259,6 +262,22 @@
                   노드의 파티션과 GPU 종류는 서버가 자동으로 확인합니다.
                 </p>
 
+                <div
+                  id="request-mode-switch"
+                  class="request-mode-switch"
+                  role="group"
+                  aria-label="자원 요청 방식"
+                >
+                  <button type="button" data-request-mode="available" disabled>
+                    <strong>현재 여유 자원</strong>
+                    <span>지금 남은 범위에서 요청</span>
+                  </button>
+                  <button type="button" data-request-mode="wait" disabled>
+                    <strong>대기 요청</strong>
+                    <span>노드 수용량 내에서 큐 대기</span>
+                  </button>
+                </div>
+
                 <div class="resource-label-row">
                   <label>요청 자원</label>
                   <span>노드 1대 기준</span>
@@ -308,7 +327,7 @@
                   <span aria-hidden="true">↗</span>
                 </button>
                 <p class="field-help centered">
-                  현재 남은 자원까지만 요청할 수 있으며, 제출 직전에 다시 확인합니다.
+                  현재 여유 모드는 남은 자원까지, 대기 요청은 노드 전체 수용량까지 선택할 수 있습니다.
                 </p>
               </section>
             </div>
