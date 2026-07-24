@@ -63,6 +63,27 @@ def _int(value: object, label: str) -> int:
     return parsed
 
 
+def _available_resource_limits(node: dict) -> dict:
+    def nonnegative(value: object) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    total_gpus = nonnegative(node.get("gpus"))
+    total_cpus = nonnegative(node.get("cpus"))
+    total_memory_mb = nonnegative(node.get("memory_mb"))
+    free_memory_mb = min(
+        total_memory_mb,
+        nonnegative(node.get("free_memory_mb")),
+    )
+    return {
+        "max_gpus": min(total_gpus, nonnegative(node.get("free_gpus"))),
+        "max_cpus": min(total_cpus, nonnegative(node.get("cpu_idle"))),
+        "max_memory_gb": free_memory_mb // 1024,
+    }
+
+
 def validate_allocation(payload: dict, node: dict) -> dict:
     partition = node["partition"]
     gpu_type = node.get("gpu_type") or _gpu_type(node.get("gres", ""))
@@ -73,17 +94,37 @@ def validate_allocation(payload: dict, node: dict) -> dict:
     cpus = _int(payload.get("cpus"), "CPU count")
     memory_gb = _int(payload.get("memory_gb"), "Memory")
     hours = _int(payload.get("hours"), "Time limit")
-    max_memory_gb = max(1, int((node["memory_mb"] / 1024) * 0.95))
+    limits = _available_resource_limits(node)
 
-    if not 1 <= gpu_count <= node["gpus"]:
+    if limits["max_gpus"] < 1:
         raise PortalError(
-            f"{node['name']} supports 1–{node['gpus']} GPUs per request."
+            f"{node['name']} has no GPU available right now. Refresh and select "
+            "another node."
         )
-    if not 1 <= cpus <= node["cpus"]:
-        raise PortalError(f"{node['name']} supports 1–{node['cpus']} CPUs.")
-    if not 1 <= memory_gb <= max_memory_gb:
+    if not 1 <= gpu_count <= limits["max_gpus"]:
         raise PortalError(
-            f"{node['name']} supports 1–{max_memory_gb} GB memory in this portal."
+            f"{node['name']} currently has {limits['max_gpus']} GPUs available. "
+            f"Request at most {limits['max_gpus']}."
+        )
+    if limits["max_cpus"] < 1:
+        raise PortalError(
+            f"{node['name']} has no CPU core available right now. Refresh and "
+            "select another node."
+        )
+    if not 1 <= cpus <= limits["max_cpus"]:
+        raise PortalError(
+            f"{node['name']} currently has {limits['max_cpus']} CPU cores "
+            f"available. Request at most {limits['max_cpus']}."
+        )
+    if limits["max_memory_gb"] < 1:
+        raise PortalError(
+            f"{node['name']} has less than 1 GB memory available right now. "
+            "Refresh and select another node."
+        )
+    if not 1 <= memory_gb <= limits["max_memory_gb"]:
+        raise PortalError(
+            f"{node['name']} currently has {limits['max_memory_gb']} GB memory "
+            f"available. Request at most {limits['max_memory_gb']} GB."
         )
     if hours < 0:
         raise PortalError("Time limit must be zero (no limit) or a positive number.")
@@ -478,11 +519,7 @@ class SlurmClient:
         return {
             "node": node,
             "gpu_type": gpu_type,
-            "request_limits": {
-                "max_gpus": node["gpus"],
-                "max_cpus": node["cpus"],
-                "max_memory_gb": max(1, int((node["memory_mb"] / 1024) * 0.95)),
-            },
+            "request_limits": _available_resource_limits(node),
             "gpu_slots": gpu_slots,
             "jobs": sorted(node_jobs, key=lambda item: int(item["id"])),
             "summary": {

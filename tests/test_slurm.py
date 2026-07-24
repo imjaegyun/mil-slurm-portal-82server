@@ -11,8 +11,11 @@ G2_NODE = {
     "state": "mix",
     "cpus": 128,
     "memory_mb": 1024000,
+    "free_memory_mb": 433250,
     "gres": "gpu:a6000:8(S:0-1)",
     "gpus": 8,
+    "free_gpus": 6,
+    "cpu_idle": 112,
 }
 
 
@@ -122,6 +125,54 @@ class AllocationValidationTests(unittest.TestCase):
                 G2_NODE,
             )
 
+    def test_rejects_request_above_current_free_gpus(self):
+        with self.assertRaisesRegex(PortalError, "6 GPUs available"):
+            validate_allocation(
+                {
+                    "gpu_count": 7,
+                    "cpus": 8,
+                    "memory_gb": 64,
+                    "hours": 4,
+                },
+                G2_NODE,
+            )
+
+    def test_rejects_request_above_current_idle_cpus(self):
+        with self.assertRaisesRegex(PortalError, "112 CPU cores available"):
+            validate_allocation(
+                {
+                    "gpu_count": 1,
+                    "cpus": 113,
+                    "memory_gb": 64,
+                    "hours": 4,
+                },
+                G2_NODE,
+            )
+
+    def test_rejects_request_above_current_free_memory(self):
+        with self.assertRaisesRegex(PortalError, "423 GB memory available"):
+            validate_allocation(
+                {
+                    "gpu_count": 1,
+                    "cpus": 8,
+                    "memory_gb": 424,
+                    "hours": 4,
+                },
+                G2_NODE,
+            )
+
+    def test_rejects_node_without_currently_available_gpu(self):
+        with self.assertRaisesRegex(PortalError, "no GPU available"):
+            validate_allocation(
+                {
+                    "gpu_count": 1,
+                    "cpus": 8,
+                    "memory_gb": 64,
+                    "hours": 4,
+                },
+                {**G2_NODE, "free_gpus": 0},
+            )
+
 
 class SlurmClientTests(unittest.TestCase):
     def setUp(self):
@@ -190,6 +241,21 @@ class SlurmClientTests(unittest.TestCase):
                 }
             )
 
+    def test_submit_rejects_request_above_live_availability(self):
+        with self.assertRaisesRegex(PortalError, "6 GPUs available"):
+            self.client.submit_allocation(
+                {
+                    "node_name": "n003",
+                    "gpu_count": 7,
+                    "cpus": 8,
+                    "memory_gb": 64,
+                    "hours": 4,
+                }
+            )
+        self.assertFalse(
+            any(Path(args[0]).name == "sbatch" for args, _ in self.runner.calls)
+        )
+
     def test_cancel_only_managed_job(self):
         result = self.client.cancel_allocation("7001")
         self.assertTrue(result["cancelled"])
@@ -204,6 +270,9 @@ class SlurmClientTests(unittest.TestCase):
         self.assertEqual(detail["summary"]["allocated_gpus"], 2)
         self.assertEqual(detail["summary"]["free_gpus"], 6)
         self.assertEqual(detail["node"]["free_memory_mb"], 433250)
+        self.assertEqual(detail["request_limits"]["max_gpus"], 6)
+        self.assertEqual(detail["request_limits"]["max_cpus"], 112)
+        self.assertEqual(detail["request_limits"]["max_memory_gb"], 423)
         self.assertFalse(detail["gpu_slots"][3]["allocated"])
         self.assertEqual(detail["gpu_slots"][4]["job"]["user"], "ijg2603")
         self.assertEqual(detail["gpu_slots"][5]["job"]["id"], "7001")
