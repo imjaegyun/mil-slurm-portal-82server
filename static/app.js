@@ -1,0 +1,908 @@
+const state = {
+  token: sessionStorage.getItem("tgm-portal-token") || "",
+  csrf: "",
+  timer: null,
+  currentNode: "",
+  currentNodeDetail: null,
+  selectedNode: null,
+  nodes: [],
+  pendingNode: "",
+  nodeMode: "",
+  nodePartition: "",
+  nodeSearch: "",
+  nodeSort: "node",
+};
+
+const $ = (selector) => document.querySelector(selector);
+
+function toast(message, type = "success") {
+  const item = document.createElement("div");
+  item.className = `toast ${type}`;
+  item.textContent = message;
+  $("#toast-region").append(item);
+  window.setTimeout(() => item.remove(), 4600);
+}
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${state.token}`);
+  if (options.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (options.method && options.method !== "GET" && path !== "/api/auth") {
+    headers.set("X-CSRF-Token", state.csrf);
+  }
+  const response = await fetch(path, { ...options, headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `요청 실패 (${response.status})`);
+  }
+  return payload;
+}
+
+function setConnection(online, message) {
+  const dot = $("#connection-dot");
+  dot.classList.toggle("online", online);
+  dot.classList.toggle("offline", !online);
+  $("#connection-text").textContent = message;
+}
+
+function setUnlocked(unlocked) {
+  $("#unlock").classList.toggle("is-hidden", unlocked);
+  $("#app").classList.toggle("is-hidden", !unlocked);
+  if (!unlocked) {
+    $("#access-token").focus();
+  }
+}
+
+function createText(tag, className, value) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  element.textContent = value;
+  return element;
+}
+
+function formatMemory(memoryMb) {
+  const value = Number(memoryMb);
+  if (!Number.isFinite(value)) return "—";
+  return `${Math.max(0, Math.round(value / 1024)).toLocaleString("ko-KR")} GB`;
+}
+
+function formatGpuLabel(gpuType) {
+  const normalized = String(gpuType || "").toLowerCase();
+  const labels = {
+    rtx3090: "RTX 3090",
+    a10: "A10",
+    a6000: "A6000",
+    a6000ada: "A6000 Ada",
+    h200: "H200",
+  };
+  return labels[normalized] || normalized.toUpperCase() || "GPU";
+}
+
+function nodeAcceptsJobs(node) {
+  return ["idle", "mix", "alloc"].includes(node.state);
+}
+
+function visibleNodes(nodes) {
+  const query = state.nodeSearch.trim().toLowerCase();
+  const filtered = nodes.filter((node) => {
+      const selected = state.selectedNode?.node.name === node.name;
+      if (state.nodePartition && node.partition !== state.nodePartition) return selected;
+      if (query && !`${node.name} ${node.partition} ${node.gpu_type}`.toLowerCase().includes(query)) {
+        return selected;
+      }
+      if (state.nodeMode === "available" && !(nodeAcceptsJobs(node) && node.free_gpus > 0)) {
+        return selected;
+      }
+      return true;
+    });
+  const byNodeName = (left, right) =>
+    left.name.localeCompare(right.name, undefined, { numeric: true });
+  if (state.nodeSort === "available") {
+    return filtered.sort(
+      (left, right) =>
+        right.free_gpus - left.free_gpus ||
+        right.free_memory_mb - left.free_memory_mb ||
+        byNodeName(left, right),
+    );
+  }
+  if (state.nodeSort === "partition") {
+    return filtered.sort(
+      (left, right) =>
+        left.partition.localeCompare(right.partition, undefined, { numeric: true }) ||
+        byNodeName(left, right),
+    );
+  }
+  return filtered.sort(byNodeName);
+}
+
+function renderNodes(nodes) {
+  const container = $("#node-list");
+  container.replaceChildren();
+  const filteredNodes = visibleNodes(nodes);
+  if (!filteredNodes.length) {
+    container.append(createText("div", "empty-state", "표시할 노드가 없습니다."));
+    return;
+  }
+  filteredNodes.forEach((node) => {
+    const gpuText = formatGpuLabel(node.gpu_type);
+    const card = createText(
+      "button",
+      `node-card ${node.gpu_type === "h200" ? "h200-node" : ""} ` +
+        `${state.selectedNode?.node.name === node.name ? "selected-node-card" : ""}`,
+      "",
+    );
+    card.type = "button";
+    card.dataset.node = node.name;
+    card.setAttribute(
+      "aria-label",
+      `${node.name} 상세 보기, ${gpuText} ${node.gpus}개, 상태 ${node.state}`,
+    );
+    const header = createText("div", "node-header", "");
+    const identity = createText("div", "node-identity", "");
+    identity.append(
+      createText("span", "node-name", node.name),
+      createText("span", "node-partition", node.partition),
+    );
+    header.append(
+      identity,
+      createText("span", `state-badge ${node.state}`, node.state),
+    );
+    const allocated = node.cpu_allocated || 0;
+    const idle = node.cpu_idle || 0;
+    const utilization = node.cpus ? Math.round((allocated / node.cpus) * 100) : 0;
+    const level = Math.min(100, Math.ceil(utilization / 10) * 10);
+    const specGrid = createText("div", "node-spec-grid", "");
+    const gpuSpec = createText("div", "node-spec-item", "");
+    gpuSpec.append(
+      createText("span", "", "GPU"),
+      createText("strong", "", `${gpuText} × ${node.gpus}`),
+    );
+    const cpuSpec = createText("div", "node-spec-item", "");
+    cpuSpec.append(
+      createText("span", "", "CPU"),
+      createText("strong", "", `${node.cpus} cores`),
+    );
+    const memorySpec = createText("div", "node-spec-item memory-spec", "");
+    memorySpec.append(
+      createText("span", "", "MEM FREE"),
+      createText(
+        "strong",
+        "",
+        `${formatMemory(node.free_memory_mb)} / ${formatMemory(node.memory_mb)}`,
+      ),
+    );
+    specGrid.append(gpuSpec, cpuSpec, memorySpec);
+
+    const meter = createText("div", "utilization", "");
+    const meterLabel = createText("div", "utilization-label", "");
+    meterLabel.append(
+      createText("span", "", "CPU utilization"),
+      createText("strong", "", `${utilization}%`),
+    );
+    const track = createText("div", "utilization-track", "");
+    track.append(createText("span", `utilization-fill level-${level}`, ""));
+    meter.append(meterLabel, track);
+    const meta = createText("span", "node-meta", `${allocated} allocated · ${idle} idle`);
+    card.append(header, specGrid, meter, meta);
+    container.append(card);
+  });
+}
+
+function renderRequestNodes(nodes) {
+  const container = $("#request-node-list");
+  container.replaceChildren();
+  const filteredNodes = visibleNodes(nodes);
+  $("#visible-node-count").textContent = `${filteredNodes.length}/${nodes.length} nodes`;
+  if (!filteredNodes.length) {
+    container.append(createText("div", "request-node-loading", "선택할 수 있는 노드가 없습니다."));
+    return;
+  }
+
+  filteredNodes.forEach((node) => {
+    const gpuLabel = formatGpuLabel(node.gpu_type);
+    const selected = state.selectedNode?.node.name === node.name;
+    const pending = state.pendingNode === node.name;
+    const unavailable = !nodeAcceptsJobs(node);
+    const freeGpus = Number.isInteger(node.free_gpus) ? node.free_gpus : null;
+    const card = createText(
+      "button",
+      `request-node-choice ${node.gpu_type === "h200" ? "h200-choice" : ""} ` +
+        `${selected ? "selected" : ""} ${pending ? "loading" : ""}`,
+      "",
+    );
+    card.type = "button";
+    card.dataset.requestNode = node.name;
+    card.setAttribute("role", "radio");
+    card.setAttribute("aria-checked", String(selected));
+    card.setAttribute("aria-busy", String(pending));
+    card.disabled = unavailable || pending;
+    card.setAttribute(
+      "aria-label",
+      `${node.name}, ${node.partition} 파티션, ${gpuLabel} ${node.gpus}개, ` +
+        `${freeGpus === null ? "GPU 여유 확인 필요" : `${freeGpus}개 사용 가능`}, ` +
+        `여유 메모리 ${formatMemory(node.free_memory_mb)}`,
+    );
+
+    const top = createText("div", "request-node-top", "");
+    const identity = createText("div", "request-node-identity", "");
+    identity.append(
+      createText("strong", "", node.name),
+      createText("span", "", node.partition),
+    );
+    top.append(
+      identity,
+      createText(
+        "span",
+        "request-node-mark",
+        pending ? "…" : selected ? "✓" : "",
+      ),
+    );
+
+    const gpu = createText("div", "request-node-gpu", "");
+    gpu.append(
+      createText("span", "", "GPU"),
+      createText("strong", "", `${gpuLabel} × ${node.gpus}`),
+    );
+
+    const memory = createText("div", "request-node-memory", "");
+    memory.append(
+      createText("span", "", "실시간 여유 메모리"),
+      createText("strong", "", formatMemory(node.free_memory_mb)),
+    );
+
+    const availability = createText(
+      "div",
+      `request-node-availability ${
+        freeGpus === 0 ? "waiting" : unavailable ? "unavailable" : ""
+      }`,
+      unavailable
+        ? "새 요청 불가"
+        : freeGpus === null
+          ? "여유 GPU 확인 중"
+          : freeGpus > 0
+            ? `${freeGpus}/${node.gpus} GPU 사용 가능`
+            : "여유 GPU 없음 · 대기 가능",
+    );
+
+    const footer = createText("div", "request-node-footer", "");
+    footer.append(
+      createText("span", "", `CPU ${node.cpu_idle}/${node.cpus} 여유`),
+      createText("span", `state-badge ${node.state}`, node.state),
+    );
+    card.append(top, gpu, memory, availability, footer);
+    container.append(card);
+  });
+}
+
+function renderNodeDetail(data) {
+  const { node, summary, gpu_slots: gpuSlots, jobs } = data;
+  state.currentNodeDetail = data;
+  const requestButton = $("#node-request-button");
+  requestButton.disabled = false;
+  const selected = state.selectedNode?.node.name === node.name;
+  requestButton.textContent = selected
+    ? "선택 해제"
+    : summary.free_gpus > 0
+      ? "요청 노드로 선택"
+      : "대기 요청 노드로 선택";
+  $("#node-detail-title").textContent = node.name;
+  $("#node-detail-state").textContent = node.state;
+  $("#node-detail-state").className = `state-badge ${node.state}`;
+  $("#node-detail-subtitle").textContent =
+    `${node.partition} partition · ${node.cpus} CPU · ` +
+    `${Math.round(node.memory_mb / 1024)} GB memory`;
+  $("#node-total-gpus").textContent = summary.total_gpus;
+  $("#node-allocated-gpus").textContent = summary.allocated_gpus;
+  $("#node-free-gpus").textContent = summary.free_gpus;
+  $("#node-free-memory").textContent = formatMemory(node.free_memory_mb);
+  $("#node-job-count").textContent = summary.job_count;
+
+  const gpuList = $("#gpu-slot-list");
+  gpuList.replaceChildren();
+  gpuSlots.forEach((slot) => {
+    const card = createText(
+      "article",
+      `gpu-slot ${slot.allocated ? "allocated" : "available"} ` +
+        `${slot.type === "h200" ? "h200-slot" : ""}`,
+      "",
+    );
+    const header = createText("div", "gpu-slot-header", "");
+    const identity = createText("div", "gpu-slot-identity", "");
+    identity.append(
+      createText("span", "gpu-index-label", "GPU"),
+      createText("strong", "gpu-index", String(slot.index)),
+    );
+    header.append(
+      identity,
+      createText(
+        "span",
+        "gpu-status",
+        slot.allocated ? "ALLOCATED" : "AVAILABLE",
+      ),
+    );
+
+    const model = createText(
+      "span",
+      "gpu-model",
+      `NVIDIA ${formatGpuLabel(slot.type)}`,
+    );
+    card.append(header, model);
+
+    if (slot.allocated && slot.job) {
+      const owner = createText("div", "gpu-owner", "");
+      owner.append(
+        createText(
+          "span",
+          "user-avatar",
+          slot.job.user.slice(0, 2).toUpperCase(),
+        ),
+        createText("strong", "gpu-owner-name", slot.job.user),
+      );
+      const job = createText("div", "gpu-job", "");
+      job.append(
+        createText("span", "gpu-job-name", slot.job.name),
+        createText("code", "", `#${slot.job.id}`),
+      );
+      const runtime = createText(
+        "span",
+        "gpu-runtime",
+        `Running ${slot.job.runtime || "—"}`,
+      );
+      card.append(owner, job, runtime);
+    } else if (slot.allocated) {
+      const allocated = createText("div", "gpu-available-copy allocated-copy", "");
+      allocated.append(
+        createText("strong", "", "사용 중"),
+        createText("span", "", "Job 사용자 정보를 확인할 수 없습니다."),
+      );
+      card.append(allocated);
+    } else {
+      const available = createText("div", "gpu-available-copy", "");
+      available.append(
+        createText("strong", "", "사용 가능"),
+        createText("span", "", "현재 예약된 Job이 없습니다."),
+      );
+      card.append(available);
+    }
+    gpuList.append(card);
+  });
+
+  const jobList = $("#node-job-list");
+  jobList.replaceChildren();
+  if (!jobs.length) {
+    jobList.append(
+      createText("div", "detail-empty", "이 노드에서 실행 중인 GPU Job이 없습니다."),
+    );
+  } else {
+    jobs.forEach((job) => {
+      const row = createText(
+        "article",
+        `node-job-row ${job.is_current_user ? "mine" : ""}`,
+        "",
+      );
+      const owner = createText("div", "node-job-owner", "");
+      owner.append(
+        createText("span", "user-avatar small-avatar", job.user.slice(0, 2).toUpperCase()),
+        createText("strong", "", job.user),
+      );
+      const identity = createText("div", "node-job-identity", "");
+      identity.append(
+        createText("strong", "", job.name),
+        createText("span", "mono", `Job #${job.id}`),
+      );
+      const gpu = createText("div", "node-job-gpus", "");
+      gpu.append(
+        createText("strong", "", `${job.gpu_count} GPU`),
+        createText(
+          "span",
+          "mono",
+          job.gpu_indices.map((index) => `#${index}`).join(" · "),
+        ),
+      );
+      const runtime = createText("div", "node-job-runtime", "");
+      runtime.append(
+        createText("strong", "", job.runtime || "—"),
+        createText("span", "", job.time_limit === "UNLIMITED" ? "No time limit" : `Limit ${job.time_limit}`),
+      );
+      row.append(owner, identity, gpu, runtime);
+      jobList.append(row);
+    });
+  }
+
+  const date = new Date(data.updated_at);
+  $("#node-detail-updated").textContent =
+    `${date.toLocaleTimeString("ko-KR")} 기준`;
+}
+
+async function loadNodeDetail(nodeName, silent = false) {
+  const refreshButton = $("#node-detail-refresh");
+  refreshButton.disabled = true;
+  refreshButton.textContent = "불러오는 중…";
+  try {
+    const data = await api(`/api/nodes/${encodeURIComponent(nodeName)}`);
+    renderNodeDetail(data);
+  } catch (error) {
+    if (!silent) toast(error.message, "error");
+    $("#gpu-slot-list").replaceChildren(
+      createText("div", "detail-empty error-copy", error.message),
+    );
+    $("#node-job-list").replaceChildren();
+  } finally {
+    refreshButton.disabled = false;
+    refreshButton.textContent = "새로고침";
+  }
+}
+
+function openNodeDetail(nodeName) {
+  state.currentNode = nodeName;
+  state.currentNodeDetail = null;
+  $("#node-request-button").disabled = true;
+  $("#node-request-button").textContent = "정보 확인 중…";
+  $("#node-detail-title").textContent = nodeName;
+  $("#node-detail-subtitle").textContent = "Slurm 할당 정보를 불러오는 중입니다.";
+  $("#gpu-slot-list").replaceChildren(
+    createText("div", "detail-loading", "GPU 정보를 불러오는 중입니다."),
+  );
+  $("#node-job-list").replaceChildren(
+    createText("div", "detail-loading", "Job 정보를 불러오는 중입니다."),
+  );
+  const dialog = $("#node-dialog");
+  if (!dialog.open) dialog.showModal();
+  loadNodeDetail(nodeName);
+}
+
+function clearNodeSelection({ closeDialog = false, announce = true } = {}) {
+  const previousNode = state.selectedNode?.node.name;
+  state.selectedNode = null;
+  state.pendingNode = "";
+  $("#node-name").value = "";
+  $("#selected-node-target").className = "selected-node-target empty";
+  $("#selected-node-icon").textContent = "?";
+  $("#selected-node-kicker").textContent = "NO NODE SELECTED";
+  $("#selected-node-name").textContent = "왼쪽에서 노드를 선택하세요";
+  $("#selected-node-spec").textContent =
+    "선택하면 사용 가능한 자원 한도가 적용됩니다.";
+  $("#node-description").textContent =
+    "노드의 파티션과 GPU 종류는 서버가 자동으로 확인합니다.";
+  ["#gpu-count", "#cpus", "#memory"].forEach((selector) => {
+    $(selector).removeAttribute("max");
+  });
+  const submitButton = $("#submit-allocation");
+  submitButton.disabled = true;
+  submitButton.replaceChildren(
+    createText("span", "", "노드를 먼저 선택하세요"),
+    createText("span", "", "↗"),
+  );
+  renderFilteredNodeViews();
+  updatePreview();
+  if (closeDialog && $("#node-dialog").open) $("#node-dialog").close();
+  if (announce && previousNode) toast(`${previousNode} 선택을 해제했습니다.`);
+}
+
+function selectNodeForAllocation(
+  detail,
+  { closeDialog = true, scroll = true, announce = true } = {},
+) {
+  state.selectedNode = detail;
+  state.pendingNode = "";
+  const { node, summary, request_limits: limits } = detail;
+  const gpuLabel = formatGpuLabel(detail.gpu_type);
+  $("#node-name").value = node.name;
+  $("#selected-node-target").classList.remove("empty");
+  $("#selected-node-target").classList.toggle("h200-target", detail.gpu_type === "h200");
+  $("#selected-node-icon").textContent = node.name.slice(-1);
+  $("#selected-node-kicker").textContent = `${node.partition.toUpperCase()} · ${gpuLabel}`;
+  $("#selected-node-name").textContent = node.name;
+  $("#selected-node-spec").textContent =
+    `${summary.free_gpus}/${summary.total_gpus} GPU available · ` +
+    `${formatMemory(node.free_memory_mb)} memory free`;
+  $("#node-description").textContent =
+    `${node.name}에 고정 제출합니다. 현재 여유 GPU가 부족하면 Slurm에서 PENDING으로 대기합니다.`;
+
+  $("#gpu-count").max = limits.max_gpus;
+  $("#cpus").max = limits.max_cpus;
+  $("#memory").max = limits.max_memory_gb;
+  $("#gpu-count").value = Math.min(Number($("#gpu-count").value), limits.max_gpus);
+  $("#cpus").value = Math.min(Number($("#cpus").value), limits.max_cpus);
+  $("#memory").value = Math.min(Number($("#memory").value), limits.max_memory_gb);
+  const submitButton = $("#submit-allocation");
+  submitButton.disabled = false;
+  submitButton.replaceChildren(
+    createText("span", "", "선택한 노드에 Job 제출"),
+    createText("span", "", "↗"),
+  );
+  document.querySelectorAll(".node-card").forEach((card) => {
+    card.classList.toggle("selected-node-card", card.dataset.node === node.name);
+  });
+  renderRequestNodes(state.nodes);
+  updatePreview();
+  if (closeDialog && $("#node-dialog").open) $("#node-dialog").close();
+  if (scroll) {
+    $("#allocation-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  if (announce) toast(`${node.name}을 Job 요청 대상으로 선택했습니다.`);
+}
+
+async function selectRequestNode(nodeName) {
+  if (state.selectedNode?.node.name === nodeName) {
+    clearNodeSelection();
+    return;
+  }
+  state.pendingNode = nodeName;
+  renderRequestNodes(state.nodes);
+  try {
+    const detail = await api(`/api/nodes/${encodeURIComponent(nodeName)}`);
+    selectNodeForAllocation(detail, {
+      closeDialog: false,
+      scroll: false,
+      announce: false,
+    });
+  } catch (error) {
+    state.pendingNode = "";
+    renderRequestNodes(state.nodes);
+    toast(error.message, "error");
+  }
+}
+
+function renderJobs(jobs) {
+  const body = $("#jobs-body");
+  body.replaceChildren();
+  if (!jobs.length) {
+    const row = document.createElement("tr");
+    const cell = createText("td", "empty-state", "");
+    cell.colSpan = 7;
+    const empty = createText("div", "queue-empty", "");
+    empty.append(
+      createText("span", "queue-empty-mark", "0"),
+      createText("strong", "", "큐가 비어 있습니다"),
+      createText(
+        "span",
+        "",
+        "현재 실행 또는 대기 중인 작업이 없습니다. 새 자원을 요청해 시작하세요.",
+      ),
+    );
+    cell.append(empty);
+    row.append(cell);
+    body.append(row);
+    return;
+  }
+
+  jobs.forEach((job) => {
+    const row = document.createElement("tr");
+
+    const identity = document.createElement("td");
+    identity.append(
+      createText("span", "job-name", job.name),
+      createText("span", "job-sub mono", `#${job.id}`),
+    );
+
+    const stateCell = document.createElement("td");
+    const normalized = job.state.toLowerCase();
+    stateCell.append(createText("span", `job-state ${normalized}`, job.state));
+
+    const partition = createText("td", "mono", job.partition);
+    const resources = document.createElement("td");
+    resources.append(
+      createText("span", "", job.gres || "GPU 정보 없음"),
+      createText("span", "job-sub", `${job.cpus} CPU · ${job.memory || "memory —"}`),
+    );
+    const location = document.createElement("td");
+    location.append(
+      createText("span", "", job.nodes || "—"),
+      createText("span", "job-sub", job.reason || "—"),
+    );
+    const time = document.createElement("td");
+    time.append(
+      createText("span", "mono", job.elapsed || "—"),
+      createText("span", "job-sub mono", `남음 ${job.remaining || "—"}`),
+    );
+    const action = document.createElement("td");
+    if (job.portal_managed) {
+      const button = createText("button", "danger-button", "취소");
+      button.type = "button";
+      button.dataset.cancelJob = job.id;
+      button.dataset.jobName = job.name;
+      action.append(button);
+    } else {
+      action.append(createText("span", "read-only", "조회만"));
+    }
+
+    row.append(identity, stateCell, partition, resources, location, time, action);
+    body.append(row);
+  });
+}
+
+function updateNodeFilterControls(nodes) {
+  const partitions = Array.from(new Set(nodes.map((node) => node.partition))).sort(
+    (left, right) => left.localeCompare(right, undefined, { numeric: true }),
+  );
+  const select = $("#node-partition-filter");
+  const currentOptions = Array.from(select.options)
+    .slice(1)
+    .map((option) => option.value);
+  if (currentOptions.join("|") !== partitions.join("|")) {
+    select.replaceChildren(new Option("모든 GPU 파티션", ""));
+    partitions.forEach((partition) => {
+      const partitionNodes = nodes.filter((node) => node.partition === partition);
+      const gpuTypes = Array.from(
+        new Set(partitionNodes.map((node) => formatGpuLabel(node.gpu_type))),
+      ).join(" · ");
+      select.append(
+        new Option(`${partition} · ${gpuTypes} · ${partitionNodes.length} nodes`, partition),
+      );
+    });
+  }
+  if (state.nodePartition && !partitions.includes(state.nodePartition)) {
+    state.nodePartition = "";
+  }
+  select.value = state.nodePartition;
+  document.querySelectorAll("[data-node-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.nodeMode === state.nodeMode);
+  });
+}
+
+function renderFilteredNodeViews() {
+  renderNodes(state.nodes);
+  renderRequestNodes(state.nodes);
+}
+
+function updateMetrics(data) {
+  $("#metric-nodes").textContent = data.summary.nodes;
+  $("#metric-gpus").textContent = data.summary.total_gpus;
+  $("#metric-jobs").textContent = data.summary.jobs;
+  $("#metric-jobs-detail").textContent =
+    `${data.summary.running} running · ${data.summary.pending} pending`;
+  $("#metric-user").textContent = data.user;
+  $("#footer-user").textContent = data.user;
+  $("#sidebar-server").textContent = data.server;
+  $("#sidebar-cluster").textContent = `${data.cluster} · Slurm cluster`;
+  $("#page-cluster-label").textContent =
+    `${data.server} · ${data.cluster}`.toUpperCase();
+  $("#footer-server").textContent = data.server;
+  $("#metric-gpu-types").textContent = Array.from(
+    new Set(data.nodes.map((node) => formatGpuLabel(node.gpu_type))),
+  ).join(" · ");
+  document.title = `MIL Compute · ${data.server}`;
+  const activeNodes = data.nodes.filter((node) =>
+    ["idle", "mix", "alloc"].includes(node.state),
+  ).length;
+  $("#metric-nodes-detail").textContent = `${activeNodes}/${data.summary.nodes} nodes online`;
+  const date = new Date(data.updated_at);
+  $("#last-updated").textContent = `${date.toLocaleTimeString("ko-KR")} 갱신`;
+}
+
+async function loadOverview(silent = false) {
+  try {
+    const data = await api("/api/overview");
+    state.nodes = data.nodes;
+    if (!state.nodeMode) {
+      state.nodeMode = data.nodes.length > 20 ? "available" : "all";
+    }
+    updateNodeFilterControls(data.nodes);
+    updateMetrics(data);
+    renderFilteredNodeViews();
+    renderJobs(data.jobs);
+    setConnection(true, `${data.server} 연결됨`);
+  } catch (error) {
+    setConnection(false, "연결 오류");
+    if (!silent) toast(error.message, "error");
+  }
+}
+
+function updatePreview() {
+  if (!state.selectedNode) {
+    $("#request-preview").textContent = "노드를 선택하세요";
+    return;
+  }
+  const { node } = state.selectedNode;
+  const timeLimit = $("#no-time-limit").checked ? "No limit" : `${$("#hours").value}h`;
+  $("#request-preview").textContent =
+    `${node.name} / ${node.partition} / ${$("#gpu-count").value} GPU / ` +
+    `${$("#cpus").value} CPU / ${$("#memory").value} GB / ${timeLimit}`;
+}
+
+function updateTimeLimitMode() {
+  const unlimited = $("#no-time-limit").checked;
+  $("#hours").disabled = unlimited;
+  $("#hours").required = !unlimited;
+  $(".time-resource-field").classList.toggle("unlimited", unlimited);
+  updatePreview();
+}
+
+async function authorize(token) {
+  state.token = token.trim();
+  const data = await api("/api/auth", { method: "POST" });
+  state.csrf = data.csrf_token;
+  sessionStorage.setItem("tgm-portal-token", state.token);
+  setUnlocked(true);
+  setConnection(true, "Slurm 연결됨");
+  await loadOverview();
+  window.clearInterval(state.timer);
+  state.timer = window.setInterval(() => loadOverview(true), 10000);
+}
+
+$("#unlock-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("#unlock-error").textContent = "";
+  try {
+    await authorize($("#access-token").value);
+    $("#access-token").value = "";
+  } catch (error) {
+    state.token = "";
+    $("#unlock-error").textContent = error.message;
+  }
+});
+
+$("#refresh").addEventListener("click", () => loadOverview());
+$("#focus-form").addEventListener("click", () => {
+  $("#allocation-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+$(".filter-modes").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-node-mode]");
+  if (!button) return;
+  state.nodeMode = button.dataset.nodeMode;
+  updateNodeFilterControls(state.nodes);
+  renderFilteredNodeViews();
+});
+
+$("#node-partition-filter").addEventListener("change", (event) => {
+  state.nodePartition = event.target.value;
+  renderFilteredNodeViews();
+});
+
+$("#node-sort").addEventListener("change", (event) => {
+  state.nodeSort = event.target.value;
+  renderFilteredNodeViews();
+});
+
+$("#node-search").addEventListener("input", (event) => {
+  state.nodeSearch = event.target.value;
+  renderFilteredNodeViews();
+});
+
+const navItems = Array.from(document.querySelectorAll(".nav-item"));
+const navSections = navItems
+  .map((item) => document.querySelector(item.getAttribute("href")))
+  .filter(Boolean);
+
+function updateActiveNavigation() {
+  const current =
+    navSections
+      .filter((section) => section.getBoundingClientRect().top <= 130)
+      .at(-1) || navSections[0];
+  navItems.forEach((item) => {
+    item.classList.toggle("active", item.getAttribute("href") === `#${current.id}`);
+  });
+}
+
+$(".sidebar-nav").addEventListener("click", (event) => {
+  const item = event.target.closest(".nav-item");
+  if (!item) return;
+  navItems.forEach((candidate) => candidate.classList.toggle("active", candidate === item));
+});
+window.addEventListener("scroll", updateActiveNavigation, { passive: true });
+
+$("#allocation-form").addEventListener("input", updatePreview);
+
+$("#no-time-limit").addEventListener("change", updateTimeLimitMode);
+
+$("#request-node-list").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-request-node]");
+  if (!card || card.disabled) return;
+  selectRequestNode(card.dataset.requestNode);
+});
+
+$("#node-list").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-node]");
+  if (!card) return;
+  openNodeDetail(card.dataset.node);
+});
+
+$("#node-dialog-close").addEventListener("click", () => {
+  $("#node-dialog").close();
+  state.currentNode = "";
+  state.currentNodeDetail = null;
+});
+
+$("#node-detail-refresh").addEventListener("click", () => {
+  if (state.currentNode) loadNodeDetail(state.currentNode);
+});
+
+$("#node-request-button").addEventListener("click", () => {
+  if (!state.currentNodeDetail) return;
+  if (state.selectedNode?.node.name === state.currentNodeDetail.node.name) {
+    clearNodeSelection({ closeDialog: true });
+    return;
+  }
+  selectNodeForAllocation(state.currentNodeDetail);
+});
+
+$("#node-dialog").addEventListener("click", (event) => {
+  if (event.target === $("#node-dialog")) {
+    $("#node-dialog").close();
+    state.currentNode = "";
+  }
+});
+
+$("#node-dialog").addEventListener("close", () => {
+  state.currentNode = "";
+  state.currentNodeDetail = null;
+});
+
+$("#allocation-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.selectedNode) {
+    toast("요청할 노드를 먼저 선택하세요.", "error");
+    $("#request-node-list").scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  const { node } = state.selectedNode;
+  const unlimited = $("#no-time-limit").checked;
+  const request = {
+    node_name: node.name,
+    gpu_count: Number($("#gpu-count").value),
+    cpus: Number($("#cpus").value),
+    memory_gb: Number($("#memory").value),
+    hours: unlimited ? 0 : Number($("#hours").value),
+  };
+  const timeSummary = unlimited ? "시간 제한 없이" : `${request.hours}시간 동안`;
+  const summary =
+    `${node.name} (${node.partition})에서 ${request.gpu_count} GPU, ${request.cpus} CPU, ` +
+    `${request.memory_gb} GB를 ${timeSummary} 요청합니다. 계속할까요?`;
+  if (!window.confirm(summary)) return;
+
+  const button = $("#submit-allocation");
+  button.disabled = true;
+  button.textContent = "제출 중…";
+  try {
+    const result = await api("/api/allocations", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    toast(`Job #${result.job_id} 요청을 제출했습니다.`);
+    await loadOverview(true);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.replaceChildren(
+      createText("span", "", "선택한 노드에 Job 제출"),
+      createText("span", "", "↗"),
+    );
+  }
+});
+
+$("#jobs-body").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-cancel-job]");
+  if (!button) return;
+  const jobId = button.dataset.cancelJob;
+  const name = button.dataset.jobName;
+  if (!window.confirm(`${name} (#${jobId})을 취소하고 자원을 반납할까요?`)) return;
+  button.disabled = true;
+  try {
+    await api(`/api/jobs/${jobId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    toast(`Job #${jobId} 취소 요청을 보냈습니다.`);
+    await loadOverview(true);
+  } catch (error) {
+    toast(error.message, "error");
+    button.disabled = false;
+  }
+});
+
+updateTimeLimitMode();
+
+if (state.token) {
+  authorize(state.token).catch(() => {
+    sessionStorage.removeItem("tgm-portal-token");
+    state.token = "";
+    setUnlocked(false);
+  });
+} else {
+  setUnlocked(false);
+}

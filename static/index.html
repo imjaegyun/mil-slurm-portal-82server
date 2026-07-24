@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>MIL Compute · Machine Intelligence Lab</title>
+    <meta
+      name="description"
+      content="Machine Intelligence Lab의 Slurm 연산 자원 관리 포털"
+    >
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+
+    <div id="unlock" class="unlock-layer">
+      <form id="unlock-form" class="unlock-card">
+        <div class="brand-mark" aria-hidden="true">MI</div>
+        <p class="eyebrow">MACHINE INTELLIGENCE LAB</p>
+        <h1>MIL Compute</h1>
+        <p class="muted">
+          Slurm 클러스터의 연산 자원과 작업을 관리합니다. 접근 토큰은 현재
+          브라우저 탭에만 안전하게 보관됩니다.
+        </p>
+        <label for="access-token">접근 토큰</label>
+        <input
+          id="access-token"
+          name="access-token"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          required
+        >
+        <button class="primary wide" type="submit">Compute 포털 열기</button>
+        <p id="unlock-error" class="form-error" role="alert"></p>
+      </form>
+    </div>
+
+    <main id="app" class="app-shell is-hidden">
+      <aside class="sidebar">
+        <div>
+          <div class="sidebar-brand">
+            <div class="brand-mark small" aria-hidden="true"><span>MI</span></div>
+            <div>
+              <strong>MIL Compute</strong>
+              <span>Machine Intelligence Lab</span>
+            </div>
+          </div>
+
+          <nav class="sidebar-nav" aria-label="주요 화면">
+            <a class="nav-item active" href="#allocation-panel">
+              <span class="nav-index">01</span>
+              <span>
+                <strong>새 작업</strong>
+                <small>노드와 자원 선택</small>
+              </span>
+            </a>
+            <a class="nav-item" href="#nodes-panel">
+              <span class="nav-index">02</span>
+              <span>
+                <strong>노드 현황</strong>
+                <small>GPU 사용 상태</small>
+              </span>
+            </a>
+            <a class="nav-item" href="#jobs-panel">
+              <span class="nav-index">03</span>
+              <span>
+                <strong>내 작업</strong>
+                <small>실행 및 대기 작업</small>
+              </span>
+            </a>
+          </nav>
+        </div>
+
+        <div class="sidebar-footer">
+          <span class="sidebar-server-dot" aria-hidden="true"></span>
+          <div>
+            <strong id="sidebar-server">Slurm server</strong>
+            <small id="sidebar-cluster">cluster 확인 중</small>
+          </div>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="workspace-header">
+          <div class="workspace-heading">
+            <p class="eyebrow">MACHINE INTELLIGENCE LAB</p>
+            <h1>Compute workspace</h1>
+          </div>
+          <div class="top-actions">
+            <div class="connection-pill">
+              <span id="connection-dot" class="connection-dot"></span>
+              <span id="connection-text">연결 확인 중</span>
+            </div>
+            <button id="refresh" class="ghost" type="button">새로고침</button>
+            <button id="focus-form" class="primary" type="button">새 작업</button>
+          </div>
+        </header>
+
+        <section class="page-heading">
+          <div>
+            <p id="page-cluster-label" class="eyebrow">SLURM CLUSTER</p>
+            <h2>GPU Cluster</h2>
+            <p>노드 상태를 확인하고 필요한 연산 자원을 바로 요청하세요.</p>
+          </div>
+          <span class="live-label"><i></i>Live cluster data</span>
+        </section>
+
+        <section class="metric-grid" aria-label="클러스터 요약">
+        <article class="metric-card">
+          <div class="metric-topline">
+            <span class="metric-label">Nodes</span>
+            <span class="metric-index">01</span>
+          </div>
+          <strong id="metric-nodes">—</strong>
+          <small id="metric-nodes-detail">n001 — n005</small>
+        </article>
+        <article class="metric-card accent">
+          <div class="metric-topline">
+            <span class="metric-label">GPUs</span>
+            <span class="metric-index">02</span>
+          </div>
+          <strong id="metric-gpus">—</strong>
+          <small id="metric-gpu-types">GPU 종류 확인 중</small>
+        </article>
+        <article class="metric-card">
+          <div class="metric-topline">
+            <span class="metric-label">My jobs</span>
+            <span class="metric-index">03</span>
+          </div>
+          <strong id="metric-jobs">—</strong>
+          <small id="metric-jobs-detail">상태 확인 중</small>
+        </article>
+        <article class="metric-card">
+          <div class="metric-topline">
+            <span class="metric-label">Account</span>
+            <span class="metric-index">04</span>
+          </div>
+          <strong id="metric-user" class="metric-user">—</strong>
+          <small>Linux / Slurm identity</small>
+        </article>
+        </section>
+
+        <section class="cluster-filter-bar" aria-label="노드 필터">
+          <div class="filter-modes" role="group" aria-label="노드 표시 범위">
+            <button class="filter-mode active" type="button" data-node-mode="available">
+              사용 가능
+            </button>
+            <button class="filter-mode" type="button" data-node-mode="all">
+              전체 노드
+            </button>
+          </div>
+          <label class="filter-select">
+            <span class="sr-only">GPU 파티션</span>
+            <select id="node-partition-filter">
+              <option value="">모든 GPU 파티션</option>
+            </select>
+          </label>
+          <label class="filter-select">
+            <span class="sr-only">노드 정렬</span>
+            <select id="node-sort">
+              <option value="node">노드 번호순</option>
+              <option value="partition">파티션순</option>
+              <option value="available">여유 GPU순</option>
+            </select>
+          </label>
+          <label class="filter-search">
+            <span class="sr-only">노드 검색</span>
+            <input id="node-search" type="search" placeholder="노드 이름 검색">
+          </label>
+          <span id="visible-node-count" class="visible-node-count">—</span>
+        </section>
+
+        <div class="content-grid">
+        <section id="allocation-panel" class="panel allocation-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow"><span class="section-number">01</span> NEW JOB</p>
+              <h3>자원 요청</h3>
+              <p class="section-help">노드를 고른 뒤 필요한 자원만 입력하면 바로 제출할 수 있습니다.</p>
+            </div>
+          </div>
+
+          <form id="allocation-form">
+            <input id="node-name" name="node-name" type="hidden" required>
+            <div class="request-builder">
+              <section class="request-step node-picker-step" aria-labelledby="node-picker-title">
+                <div class="request-step-heading">
+                  <span class="step-number">1</span>
+                  <div>
+                    <h4 id="node-picker-title">실행할 노드 선택</h4>
+                    <p>카드를 누르면 이 요청의 실행 노드로 바로 선택됩니다.</p>
+                  </div>
+                </div>
+                <div
+                  id="request-node-list"
+                  class="request-node-list"
+                  role="radiogroup"
+                  aria-label="실행 노드"
+                >
+                  <div class="request-node-loading">노드 정보를 불러오는 중입니다.</div>
+                </div>
+                <p class="node-picker-help">
+                  GPU별 사용자와 Job은 아래 <strong>노드 현황</strong>에서 확인할 수 있습니다.
+                </p>
+              </section>
+
+              <section class="request-step resource-step" aria-labelledby="resource-step-title">
+                <div class="request-step-heading">
+                  <span class="step-number">2</span>
+                  <div>
+                    <h4 id="resource-step-title">요청 자원 설정</h4>
+                    <p>선택한 노드 한 대에서 사용할 자원을 입력하세요.</p>
+                  </div>
+                </div>
+
+                <div id="selected-node-target" class="selected-node-target empty">
+                  <span id="selected-node-icon" class="selected-node-icon">?</span>
+                  <div class="selected-node-copy">
+                    <span id="selected-node-kicker">NO NODE SELECTED</span>
+                    <strong id="selected-node-name">왼쪽에서 노드를 선택하세요</strong>
+                    <small id="selected-node-spec">선택하면 사용 가능한 자원 한도가 적용됩니다.</small>
+                  </div>
+                </div>
+                <p id="node-description" class="field-help">
+                  노드의 파티션과 GPU 종류는 서버가 자동으로 확인합니다.
+                </p>
+
+                <div class="resource-label-row">
+                  <label>요청 자원</label>
+                  <span>노드 1대 기준</span>
+                </div>
+                <div class="form-grid resource-grid">
+                  <div class="resource-field">
+                    <label for="gpu-count">GPU</label>
+                    <div class="unit-input">
+                      <input id="gpu-count" name="gpu-count" type="number" min="1" value="1" required>
+                      <span>EA</span>
+                    </div>
+                  </div>
+                  <div class="resource-field">
+                    <label for="cpus">CPU cores</label>
+                    <div class="unit-input">
+                      <input id="cpus" name="cpus" type="number" min="1" value="8" required>
+                      <span>CORE</span>
+                    </div>
+                  </div>
+                  <div class="resource-field">
+                    <label for="memory">Memory (GB)</label>
+                    <div class="unit-input">
+                      <input id="memory" name="memory" type="number" min="1" value="64" required>
+                      <span>GB</span>
+                    </div>
+                  </div>
+                  <div class="resource-field time-resource-field">
+                    <label for="hours">실행 시간</label>
+                    <div class="unit-input">
+                      <input id="hours" name="hours" type="number" min="1" value="4" required>
+                      <span>HOUR</span>
+                    </div>
+                    <label class="no-limit-option" for="no-time-limit">
+                      <input id="no-time-limit" name="no-time-limit" type="checkbox">
+                      <span class="no-limit-check" aria-hidden="true">∞</span>
+                      <span>제한 없음</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="request-preview">
+                  <span><i></i>요청 미리보기</span>
+                  <code id="request-preview">노드를 선택하세요</code>
+                </div>
+                <button id="submit-allocation" class="primary wide" type="submit" disabled>
+                  <span>노드를 먼저 선택하세요</span>
+                  <span aria-hidden="true">↗</span>
+                </button>
+                <p class="field-help centered">
+                  자원이 없으면 PENDING 상태로 대기하며, 제출 전 내용을 한 번 더 확인합니다.
+                </p>
+              </section>
+            </div>
+          </form>
+        </section>
+
+        <section id="nodes-panel" class="panel nodes-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow"><span class="section-number">02</span> CLUSTER</p>
+              <h3>노드 현황</h3>
+              <p class="section-help">노드를 클릭하면 GPU별 사용자와 실행 중인 Job을 확인합니다.</p>
+            </div>
+            <span id="last-updated" class="updated">—</span>
+          </div>
+          <div id="node-list" class="node-list">
+            <div class="empty-state">노드 정보를 불러오는 중입니다.</div>
+          </div>
+        </section>
+        </div>
+
+      <section id="jobs-panel" class="panel jobs-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow"><span class="section-number">03</span> MY JOBS</p>
+            <h3>내 작업</h3>
+          </div>
+          <div class="legend">
+            <span><i class="legend-dot running"></i>Running</span>
+            <span><i class="legend-dot pending"></i>Pending</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>상태</th>
+                <th>파티션</th>
+                <th>자원</th>
+                <th>노드 / 사유</th>
+                <th>경과 / 남은 시간</th>
+                <th><span class="sr-only">작업</span></th>
+              </tr>
+            </thead>
+            <tbody id="jobs-body">
+              <tr><td colspan="7" class="empty-state">작업 정보를 불러오는 중입니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer>
+        <span>Machine Intelligence Lab · Compute Portal</span>
+        <span><span id="footer-server">Slurm server</span> · Secure local access · <strong id="footer-user">—</strong></span>
+      </footer>
+      </div>
+    </main>
+
+    <dialog id="node-dialog" class="node-dialog" aria-labelledby="node-detail-title">
+      <div class="node-dialog-shell">
+        <header class="node-dialog-header">
+          <div>
+            <p class="eyebrow">GPU ALLOCATION</p>
+            <div class="node-dialog-title-row">
+              <h2 id="node-detail-title">Node</h2>
+              <span id="node-detail-state" class="state-badge">—</span>
+            </div>
+            <p id="node-detail-subtitle" class="node-dialog-subtitle">
+              Slurm 할당 정보를 불러오는 중입니다.
+            </p>
+          </div>
+          <div class="node-dialog-actions">
+            <button
+              id="node-request-button"
+              class="primary node-request-button"
+              type="button"
+              disabled
+            >
+              이 노드에 Job 요청
+            </button>
+            <button id="node-detail-refresh" class="ghost compact" type="button">
+              새로고침
+            </button>
+            <button
+              id="node-dialog-close"
+              class="dialog-close"
+              type="button"
+              aria-label="노드 상세 닫기"
+            >×</button>
+          </div>
+        </header>
+
+        <div class="node-detail-summary">
+          <article>
+            <span>Total GPU</span>
+            <strong id="node-total-gpus">—</strong>
+          </article>
+          <article class="allocated">
+            <span>Allocated</span>
+            <strong id="node-allocated-gpus">—</strong>
+          </article>
+          <article>
+            <span>Available</span>
+            <strong id="node-free-gpus">—</strong>
+          </article>
+          <article class="memory">
+            <span>Free memory</span>
+            <strong id="node-free-memory">—</strong>
+          </article>
+          <article>
+            <span>Running jobs</span>
+            <strong id="node-job-count">—</strong>
+          </article>
+        </div>
+
+        <section class="node-detail-section">
+          <div class="node-detail-section-heading">
+            <div>
+              <p class="eyebrow">DEVICE SLOTS</p>
+              <h3>GPU별 할당 현황</h3>
+            </div>
+            <span class="allocation-note">Slurm allocation 기준</span>
+          </div>
+          <div id="gpu-slot-list" class="gpu-slot-list">
+            <div class="detail-loading">GPU 정보를 불러오는 중입니다.</div>
+          </div>
+        </section>
+
+        <section class="node-detail-section jobs-detail-section">
+          <div class="node-detail-section-heading">
+            <div>
+              <p class="eyebrow">ACTIVE JOBS</p>
+              <h3>이 노드의 작업</h3>
+            </div>
+          </div>
+          <div id="node-job-list" class="node-job-list">
+            <div class="detail-loading">Job 정보를 불러오는 중입니다.</div>
+          </div>
+        </section>
+
+        <footer class="node-dialog-footer">
+          <span>사용자명·Job ID·GPU 인덱스만 표시합니다.</span>
+          <span id="node-detail-updated">—</span>
+        </footer>
+      </div>
+    </dialog>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  </body>
+</html>
