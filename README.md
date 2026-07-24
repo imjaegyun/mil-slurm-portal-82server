@@ -52,9 +52,9 @@ cd ~/slurm-portal
 `token.sh`가 출력한 접근 토큰은 브라우저 로그인 화면에 입력합니다.
 토큰은 서버의 `.state/access-token`에만 저장되며 Git에는 올라가지 않습니다.
 
-## Mac에서 접속
+## 접속
 
-Mac의 새 터미널에서 SSH 터널을 실행한 채로 유지합니다.
+새 터미널에서 SSH 터널을 실행한 채로 유지합니다.
 
 ```bash
 ssh -F ~/.ssh/config -N \
