@@ -50,25 +50,25 @@
           </div>
 
           <nav class="sidebar-nav" aria-label="주요 화면">
-            <a class="nav-item active" href="#allocation-panel">
+            <a class="nav-item active" href="#jobs-panel">
               <span class="nav-index">01</span>
+              <span>
+                <strong>내 작업</strong>
+                <small>실행 및 대기 작업</small>
+              </span>
+            </a>
+            <a class="nav-item" href="#allocation-panel">
+              <span class="nav-index">02</span>
               <span>
                 <strong>새 작업</strong>
                 <small>노드와 자원 선택</small>
               </span>
             </a>
             <a class="nav-item" href="#nodes-panel">
-              <span class="nav-index">02</span>
+              <span class="nav-index">03</span>
               <span>
                 <strong>노드 현황</strong>
                 <small>GPU 사용 상태</small>
-              </span>
-            </a>
-            <a class="nav-item" href="#jobs-panel">
-              <span class="nav-index">03</span>
-              <span>
-                <strong>내 작업</strong>
-                <small>실행 및 대기 작업</small>
               </span>
             </a>
           </nav>
@@ -143,6 +143,37 @@
         </article>
         </section>
 
+        <section id="jobs-panel" class="panel jobs-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow"><span class="section-number">01</span> MY JOBS</p>
+              <h3>내 작업</h3>
+            </div>
+            <div class="legend">
+              <span><i class="legend-dot running"></i>Running</span>
+              <span><i class="legend-dot pending"></i>Pending</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Job</th>
+                  <th>상태</th>
+                  <th>파티션</th>
+                  <th>자원</th>
+                  <th>노드 / 사유</th>
+                  <th>경과 / 남은 시간</th>
+                  <th><span class="sr-only">작업</span></th>
+                </tr>
+              </thead>
+              <tbody id="jobs-body">
+                <tr><td colspan="7" class="empty-state">작업 정보를 불러오는 중입니다.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="cluster-filter-bar" aria-label="노드 필터">
           <div class="filter-modes" role="group" aria-label="노드 표시 범위">
             <button class="filter-mode active" type="button" data-node-mode="available">
@@ -177,7 +208,7 @@
         <section id="allocation-panel" class="panel allocation-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow"><span class="section-number">01</span> NEW JOB</p>
+              <p class="eyebrow"><span class="section-number">02</span> NEW JOB</p>
               <h3>자원 요청</h3>
               <p class="section-help">노드를 고른 뒤 필요한 자원만 입력하면 바로 제출할 수 있습니다.</p>
             </div>
@@ -287,7 +318,7 @@
         <section id="nodes-panel" class="panel nodes-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow"><span class="section-number">02</span> CLUSTER</p>
+              <p class="eyebrow"><span class="section-number">03</span> CLUSTER</p>
               <h3>노드 현황</h3>
               <p class="section-help">노드를 클릭하면 GPU별 사용자와 실행 중인 Job을 확인합니다.</p>
             </div>
@@ -298,37 +329,6 @@
           </div>
         </section>
         </div>
-
-      <section id="jobs-panel" class="panel jobs-panel">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow"><span class="section-number">03</span> MY JOBS</p>
-            <h3>내 작업</h3>
-          </div>
-          <div class="legend">
-            <span><i class="legend-dot running"></i>Running</span>
-            <span><i class="legend-dot pending"></i>Pending</span>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Job</th>
-                <th>상태</th>
-                <th>파티션</th>
-                <th>자원</th>
-                <th>노드 / 사유</th>
-                <th>경과 / 남은 시간</th>
-                <th><span class="sr-only">작업</span></th>
-              </tr>
-            </thead>
-            <tbody id="jobs-body">
-              <tr><td colspan="7" class="empty-state">작업 정보를 불러오는 중입니다.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       <footer>
         <span>Machine Intelligence Lab · Compute Portal</span>
