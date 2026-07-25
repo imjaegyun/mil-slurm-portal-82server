@@ -24,6 +24,16 @@ PORTAL_COMMENT = "slurm-portal"
 ACCEPTING_NODE_STATES = {"idle", "mix", "alloc"}
 
 
+def _positive_env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_REQUEST_NODES = _positive_env_int("PORTAL_MAX_REQUEST_NODES", 32)
+
+
 class PortalError(RuntimeError):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
@@ -174,6 +184,41 @@ def validate_allocation(payload: dict, node: dict) -> dict:
         "memory_gb": memory_gb,
         "hours": hours,
         "wait_for_resources": wait_for_resources,
+    }
+
+
+def validate_multi_node_allocation(payload: dict, nodes: list[dict]) -> dict:
+    if not nodes:
+        raise PortalError("Select at least one node.")
+    if len(nodes) > MAX_REQUEST_NODES:
+        raise PortalError(f"Select at most {MAX_REQUEST_NODES} nodes.")
+
+    node_names = [str(node.get("name", "")).strip() for node in nodes]
+    if any(not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name) for name in node_names):
+        raise PortalError("Select valid nodes.")
+    if len(set(node_names)) != len(node_names):
+        raise PortalError("The same node cannot be selected more than once.")
+
+    requests = [validate_allocation(payload, node) for node in nodes]
+    partition = requests[0]["partition"]
+    gpu_type = requests[0]["gpu_type"]
+    if any(request["partition"] != partition for request in requests[1:]):
+        raise PortalError("All selected nodes must belong to the same partition.")
+    if any(request["gpu_type"] != gpu_type for request in requests[1:]):
+        raise PortalError("All selected nodes must provide the same GPU type.")
+
+    gpus_per_node = requests[0]["gpu_count"]
+    node_count = len(nodes)
+    return {
+        **requests[0],
+        "node_names": node_names,
+        "node_count": node_count,
+        "gpus_per_node": gpus_per_node,
+        "total_gpus": gpus_per_node * node_count,
+        "cpus_per_node": requests[0]["cpus"],
+        "total_cpus": requests[0]["cpus"] * node_count,
+        "memory_gb_per_node": requests[0]["memory_gb"],
+        "total_memory_gb": requests[0]["memory_gb"] * node_count,
     }
 
 
@@ -569,19 +614,37 @@ class SlurmClient:
         }
 
     def submit_allocation(self, payload: dict) -> dict:
-        node_name = str(payload.get("node_name", "")).strip()
-        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", node_name):
-            raise PortalError("Select a valid node.")
-        node = next(
-            (item for item in self.list_nodes() if item["name"] == node_name),
-            None,
-        )
-        if not node:
-            raise PortalError("The selected node no longer exists.", 404)
-        if node["state"] not in ACCEPTING_NODE_STATES:
-            raise PortalError(f"{node_name} is not accepting new Jobs.")
+        raw_node_names = payload.get("node_names")
+        if raw_node_names is None:
+            raw_node_names = [payload.get("node_name", "")]
+        if not isinstance(raw_node_names, list):
+            raise PortalError("Select valid nodes.")
+        node_names = [str(name).strip() for name in raw_node_names]
+        if (
+            not node_names
+            or len(node_names) > MAX_REQUEST_NODES
+            or any(
+                not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", name)
+                for name in node_names
+            )
+            or len(set(node_names)) != len(node_names)
+        ):
+            raise PortalError("Select valid, unique nodes.")
 
-        request = validate_allocation(payload, node)
+        live_nodes = {node["name"]: node for node in self.list_nodes()}
+        nodes = []
+        for node_name in node_names:
+            node = live_nodes.get(node_name)
+            if not node:
+                raise PortalError(
+                    f"The selected node {node_name} no longer exists.",
+                    404,
+                )
+            if node["state"] not in ACCEPTING_NODE_STATES:
+                raise PortalError(f"{node_name} is not accepting new Jobs.")
+            nodes.append(node)
+
+        request = validate_multi_node_allocation(payload, nodes)
         time_limit = "0" if request["hours"] == 0 else f"{request['hours']}:00:00"
         session_id = secrets.token_hex(4)
         job_name = f"{PORTAL_JOB_PREFIX}{session_id}"
@@ -593,17 +656,36 @@ class SlurmClient:
             f"--job-name={job_name}",
             f"--comment={PORTAL_COMMENT}",
             f"--partition={request['partition']}",
-            f"--nodelist={request['node_name']}",
-            "--nodes=1",
-            "--ntasks=1",
-            f"--cpus-per-task={request['cpus']}",
-            f"--mem={request['memory_gb']}G",
-            f"--gres=gpu:{request['gpu_type']}:{request['gpu_count']}",
-            f"--time={time_limit}",
-            f"--output={self.log_dir}/session-%j.out",
-            f"--error={self.log_dir}/session-%j.err",
-            "--wrap=sleep infinity",
+            f"--nodelist={','.join(request['node_names'])}",
+            f"--nodes={request['node_count']}",
         ]
+        if request["node_count"] == 1:
+            args.extend(
+                [
+                    "--ntasks=1",
+                    f"--gres=gpu:{request['gpu_type']}:{request['gpus_per_node']}",
+                ]
+            )
+        else:
+            args.extend(
+                [
+                    "--ntasks-per-node=1",
+                    (
+                        f"--gpus-per-node={request['gpu_type']}:"
+                        f"{request['gpus_per_node']}"
+                    ),
+                ]
+            )
+        args.extend(
+            [
+                f"--cpus-per-task={request['cpus']}",
+                f"--mem={request['memory_gb']}G",
+                f"--time={time_limit}",
+                f"--output={self.log_dir}/session-%j.out",
+                f"--error={self.log_dir}/session-%j.err",
+                "--wrap=sleep infinity",
+            ]
+        )
         output = self.runner(args, 12).strip()
         job_id = output.split(";", 1)[0].strip()
         if not job_id.isdigit():

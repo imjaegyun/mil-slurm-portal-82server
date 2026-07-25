@@ -7,7 +7,7 @@ Machine Intelligence Lab의 82server Slurm GPU 자원을 웹에서 확인하고,
 
 - 파티션과 노드별 GPU, CPU, 전체/남은 메모리 확인
 - 노드 상세 화면에서 GPU 번호와 사용자별 점유 현황 확인
-- 사용할 노드를 직접 선택해 GPU, CPU, 메모리와 실행 시간을 요청
+- 같은 파티션·GPU 종류의 노드를 여러 대 선택해 노드당 GPU, CPU, 메모리와 실행 시간을 요청
 - 현재 여유 모드는 남은 GPU·CPU·메모리까지만 허용하고, 대기 요청은 노드 수용량 안에서 허용
 - 실행 시간 제한 없음(`No limit`) 지원
 - 포털에서 생성한 현재 사용자 소유 Job 취소
@@ -36,10 +36,19 @@ SLURM_BIN=/TGM/SLURM/bin
 PORTAL_SERVER_NAME=82server
 PORTAL_CLUSTER_NAME=tgmv2
 PORTAL_ALLOWED_PARTITIONS=g1,g2,g3
+PORTAL_MAX_REQUEST_NODES=32
 PORTAL_PORT=18765
 ```
 
 필요한 경우 Git에 포함되지 않는 `.env` 파일만 수정합니다.
+
+## 다중 노드 요청
+
+- 첫 노드를 선택하면 같은 파티션과 같은 GPU 종류의 노드만 추가로 선택할 수 있습니다.
+- GPU, CPU, 메모리는 모두 노드당 값으로 입력하며 화면에서 전체 요청량을 계산합니다.
+- 현재 여유 모드는 선택한 모든 노드에서 즉시 확보할 수 있는 공통 범위만 허용합니다.
+- 대기 요청은 각 노드의 전체 수용량 안에서 허용되며 모든 노드의 자원이 함께 확보될 때 시작됩니다.
+- 서버는 제출 직전에 선택 노드와 자원을 다시 확인합니다.
 
 ## 실행
 

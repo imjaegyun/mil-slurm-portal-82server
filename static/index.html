@@ -225,13 +225,13 @@
                   <span class="step-number">1</span>
                   <div>
                     <h4 id="node-picker-title">실행할 노드 선택</h4>
-                    <p>카드를 누르면 이 요청의 실행 노드로 바로 선택됩니다.</p>
+                    <p>같은 파티션과 GPU 종류의 노드를 여러 대 선택할 수 있습니다.</p>
                   </div>
                 </div>
                 <div
                   id="request-node-list"
                   class="request-node-list"
-                  role="radiogroup"
+                  role="group"
                   aria-label="실행 노드"
                 >
                   <div class="request-node-loading">노드 정보를 불러오는 중입니다.</div>
@@ -246,14 +246,14 @@
                   <span class="step-number">2</span>
                   <div>
                     <h4 id="resource-step-title">요청 자원 설정</h4>
-                    <p>선택한 노드 한 대에서 사용할 자원을 입력하세요.</p>
+                    <p>선택한 모든 노드에 동일하게 적용할 노드당 자원을 입력하세요.</p>
                   </div>
                 </div>
 
                 <div id="selected-node-target" class="selected-node-target empty">
                   <span id="selected-node-icon" class="selected-node-icon">?</span>
                   <div class="selected-node-copy">
-                    <span id="selected-node-kicker">NO NODE SELECTED</span>
+                    <span id="selected-node-kicker">NO NODES SELECTED</span>
                     <strong id="selected-node-name">왼쪽에서 노드를 선택하세요</strong>
                     <small id="selected-node-spec">선택하면 사용 가능한 자원 한도가 적용됩니다.</small>
                   </div>
@@ -321,12 +321,12 @@
 
                 <div class="resource-label-row">
                   <label>요청 자원</label>
-                  <span id="resource-limit-caption">노드 1대 기준</span>
+                  <span id="resource-limit-caption">노드당 입력</span>
                 </div>
                 <div class="form-grid resource-grid">
                   <div class="resource-field">
                     <div class="resource-field-heading">
-                      <label for="gpu-count">GPU</label>
+                      <label for="gpu-count">GPU / node</label>
                       <span id="gpu-limit-hint">최대 —</span>
                     </div>
                     <div class="unit-input">
@@ -336,7 +336,7 @@
                   </div>
                   <div class="resource-field">
                     <div class="resource-field-heading">
-                      <label for="cpus">CPU cores</label>
+                      <label for="cpus">CPU cores / node</label>
                       <span id="cpu-limit-hint">최대 —</span>
                     </div>
                     <div class="unit-input">
@@ -346,7 +346,7 @@
                   </div>
                   <div class="resource-field">
                     <div class="resource-field-heading">
-                      <label for="memory">Memory (GB)</label>
+                      <label for="memory">Memory / node (GB)</label>
                       <span id="memory-limit-hint">최대 —</span>
                     </div>
                     <div class="unit-input">
@@ -377,7 +377,7 @@
                   <span aria-hidden="true">↗</span>
                 </button>
                 <p class="field-help centered">
-                  현재 여유 모드는 남은 자원까지, 대기 요청은 노드 전체 수용량까지 선택할 수 있습니다.
+                  다중 노드는 같은 파티션과 GPU 종류로 구성되며, 값은 모든 노드에 동일하게 적용됩니다.
                 </p>
               </section>
             </div>

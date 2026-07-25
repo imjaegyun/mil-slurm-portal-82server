@@ -1,8 +1,14 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from slurm_portal.slurm import PortalError, SlurmClient, validate_allocation
+from slurm_portal.slurm import (
+    PortalError,
+    SlurmClient,
+    validate_allocation,
+    validate_multi_node_allocation,
+)
 
 
 G2_NODE = {
@@ -16,6 +22,14 @@ G2_NODE = {
     "gpus": 8,
     "free_gpus": 6,
     "cpu_idle": 112,
+}
+
+G2_NODE_2 = {
+    **G2_NODE,
+    "name": "n004",
+    "free_gpus": 5,
+    "cpu_idle": 96,
+    "free_memory_mb": 500000,
 }
 
 
@@ -200,6 +214,35 @@ class AllocationValidationTests(unittest.TestCase):
                 G2_NODE,
             )
 
+    def test_multi_node_request_uses_per_node_resources(self):
+        result = validate_multi_node_allocation(
+            {
+                "gpu_count": 4,
+                "cpus": 16,
+                "memory_gb": 128,
+                "hours": 4,
+            },
+            [G2_NODE, G2_NODE_2],
+        )
+        self.assertEqual(result["node_names"], ["n003", "n004"])
+        self.assertEqual(result["node_count"], 2)
+        self.assertEqual(result["gpus_per_node"], 4)
+        self.assertEqual(result["total_gpus"], 8)
+        self.assertEqual(result["total_cpus"], 32)
+        self.assertEqual(result["total_memory_gb"], 256)
+
+    def test_multi_node_request_requires_one_partition(self):
+        with self.assertRaisesRegex(PortalError, "same partition"):
+            validate_multi_node_allocation(
+                {
+                    "gpu_count": 1,
+                    "cpus": 8,
+                    "memory_gb": 64,
+                    "hours": 4,
+                },
+                [G2_NODE, {**G2_NODE_2, "partition": "g1"}],
+            )
+
 
 class SlurmClientTests(unittest.TestCase):
     def setUp(self):
@@ -299,6 +342,41 @@ class SlurmClientTests(unittest.TestCase):
         self.assertIn("--gres=gpu:a6000:8", args)
         self.assertIn("--cpus-per-task=128", args)
         self.assertIn("--mem=950G", args)
+
+    def test_submit_supports_multiple_nodes(self):
+        with patch.object(
+            self.client,
+            "list_nodes",
+            return_value=[G2_NODE, G2_NODE_2],
+        ):
+            result = self.client.submit_allocation(
+                {
+                    "node_names": ["n003", "n004"],
+                    "gpu_count": 4,
+                    "cpus": 16,
+                    "memory_gb": 128,
+                    "hours": 4,
+                }
+            )
+        self.assertEqual(result["request"]["total_gpus"], 8)
+        args = self.runner.calls[-1][0]
+        self.assertIn("--nodes=2", args)
+        self.assertIn("--nodelist=n003,n004", args)
+        self.assertIn("--ntasks-per-node=1", args)
+        self.assertIn("--gpus-per-node=a6000:4", args)
+        self.assertNotIn("--ntasks=1", args)
+
+    def test_submit_rejects_duplicate_multi_node_selection(self):
+        with self.assertRaisesRegex(PortalError, "valid, unique nodes"):
+            self.client.submit_allocation(
+                {
+                    "node_names": ["n003", "n003"],
+                    "gpu_count": 1,
+                    "cpus": 8,
+                    "memory_gb": 64,
+                    "hours": 4,
+                }
+            )
 
     def test_cancel_only_managed_job(self):
         result = self.client.cancel_allocation("7001")

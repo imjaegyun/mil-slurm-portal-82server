@@ -750,6 +750,10 @@ select:focus {
   opacity: 0.4;
 }
 
+.request-node-choice.incompatible {
+  border-style: dashed;
+}
+
 .request-node-choice.loading {
   cursor: wait;
 }
