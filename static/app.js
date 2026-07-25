@@ -138,6 +138,109 @@ function nodeCapacityMessage(node) {
   return `${limits.max_gpus}/${node.gpus} GPU · ${limits.max_cpus}/${node.cpus} CPU 바로 사용`;
 }
 
+function updateResourceAvailability() {
+  const panel = $("#resource-availability");
+  const resources = [
+    {
+      key: "gpu",
+      unit: "개",
+      input: "#gpu-count",
+      hint: "#gpu-limit-hint",
+    },
+    {
+      key: "cpu",
+      unit: "코어",
+      input: "#cpus",
+      hint: "#cpu-limit-hint",
+    },
+    {
+      key: "memory",
+      unit: "GB",
+      input: "#memory",
+      hint: "#memory-limit-hint",
+    },
+  ];
+
+  if (!state.selectedNode) {
+    panel.className = "resource-availability empty";
+    $("#resource-availability-title").textContent = "선택 가능 한도";
+    $("#resource-availability-mode").textContent = "노드 선택 필요";
+    $("#resource-limit-caption").textContent = "노드 1대 기준";
+    resources.forEach(({ key, hint }) => {
+      $(`#resource-${key}-limit`).textContent = "—";
+      $(`#resource-${key}-remaining`).textContent = "노드를 선택하세요";
+      $(hint).textContent = "최대 —";
+      const meter = $(`#resource-${key}-meter`);
+      meter.style.width = "0%";
+      meter.parentElement.setAttribute("aria-valuemin", "0");
+      meter.parentElement.setAttribute("aria-valuemax", "0");
+      meter.parentElement.setAttribute("aria-valuenow", "0");
+      meter.parentElement.setAttribute("aria-label", `${key} 요청 한도`);
+    });
+    return;
+  }
+
+  const { node } = state.selectedNode;
+  const availableLimits =
+    state.selectedNode.request_limits || requestLimitsForNode(node);
+  const waitLimits =
+    state.selectedNode.wait_limits || waitingLimitsForNode(node);
+  const waiting = state.requestMode === "wait";
+  const limits = waiting ? waitLimits : availableLimits;
+  const values = {
+    gpu: {
+      limit: limits.max_gpus,
+      free: availableLimits.max_gpus,
+    },
+    cpu: {
+      limit: limits.max_cpus,
+      free: availableLimits.max_cpus,
+    },
+    memory: {
+      limit: limits.max_memory_gb,
+      free: availableLimits.max_memory_gb,
+    },
+  };
+
+  panel.className = `resource-availability${waiting ? " waiting" : ""}`;
+  $("#resource-availability-title").textContent = waiting
+    ? "대기 요청 선택 한도"
+    : "지금 선택 가능한 자원";
+  $("#resource-availability-mode").textContent =
+    `${node.name} · ${waiting ? "노드 수용량 기준" : "현재 여유 기준"}`;
+  $("#resource-limit-caption").textContent = waiting
+    ? "대기 요청 상한 적용"
+    : "현재 잔여량 적용";
+
+  resources.forEach(({ key, unit, input, hint }) => {
+    const { limit, free } = values[key];
+    const requestedValue = Number($(input).value);
+    const requested = Number.isFinite(requestedValue)
+      ? Math.max(0, requestedValue)
+      : 0;
+    const remaining = Math.max(0, limit - requested);
+    const percent = limit > 0 ? Math.min(100, (requested / limit) * 100) : 0;
+    const article = document.querySelector(`[data-resource-availability="${key}"]`);
+    const meter = $(`#resource-${key}-meter`);
+
+    $(`#resource-${key}-limit`).textContent =
+      `${limit.toLocaleString("ko-KR")} ${unit}까지`;
+    $(`#resource-${key}-remaining`).textContent = waiting
+      ? `현재 여유 ${free.toLocaleString("ko-KR")} ${unit} · 요청 ${requested.toLocaleString("ko-KR")}`
+      : `요청 후 ${remaining.toLocaleString("ko-KR")} ${unit} 남음`;
+    $(hint).textContent = `최대 ${limit.toLocaleString("ko-KR")}`;
+    article.classList.toggle("fully-requested", requested >= limit && limit > 0);
+    meter.style.width = `${percent}%`;
+    meter.parentElement.setAttribute("aria-valuemin", "0");
+    meter.parentElement.setAttribute("aria-valuemax", String(limit));
+    meter.parentElement.setAttribute("aria-valuenow", String(Math.min(requested, limit)));
+    meter.parentElement.setAttribute(
+      "aria-label",
+      `${key} ${requested}${unit} 요청, 최대 ${limit}${unit}`,
+    );
+  });
+}
+
 function visibleNodes(nodes) {
   const query = state.nodeSearch.trim().toLowerCase();
   const filtered = nodes.filter((node) => {
@@ -893,6 +996,7 @@ async function loadOverview(silent = false) {
 }
 
 function updatePreview() {
+  updateResourceAvailability();
   if (!state.selectedNode) {
     $("#request-preview").textContent = "노드를 선택하세요";
     return;

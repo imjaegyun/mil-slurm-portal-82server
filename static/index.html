@@ -278,27 +278,77 @@
                   </button>
                 </div>
 
+                <section
+                  id="resource-availability"
+                  class="resource-availability empty"
+                  aria-labelledby="resource-availability-title"
+                  aria-live="polite"
+                >
+                  <div class="resource-availability-heading">
+                    <div>
+                      <span>SELECTABLE RESOURCES</span>
+                      <strong id="resource-availability-title">선택 가능 한도</strong>
+                    </div>
+                    <em id="resource-availability-mode">노드 선택 필요</em>
+                  </div>
+                  <div class="resource-availability-grid">
+                    <article data-resource-availability="gpu">
+                      <span>GPU</span>
+                      <strong id="resource-gpu-limit">—</strong>
+                      <small id="resource-gpu-remaining">노드를 선택하세요</small>
+                      <div class="resource-availability-meter" role="progressbar">
+                        <i id="resource-gpu-meter"></i>
+                      </div>
+                    </article>
+                    <article data-resource-availability="cpu">
+                      <span>CPU</span>
+                      <strong id="resource-cpu-limit">—</strong>
+                      <small id="resource-cpu-remaining">노드를 선택하세요</small>
+                      <div class="resource-availability-meter" role="progressbar">
+                        <i id="resource-cpu-meter"></i>
+                      </div>
+                    </article>
+                    <article data-resource-availability="memory">
+                      <span>MEMORY</span>
+                      <strong id="resource-memory-limit">—</strong>
+                      <small id="resource-memory-remaining">노드를 선택하세요</small>
+                      <div class="resource-availability-meter" role="progressbar">
+                        <i id="resource-memory-meter"></i>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
                 <div class="resource-label-row">
                   <label>요청 자원</label>
-                  <span>노드 1대 기준</span>
+                  <span id="resource-limit-caption">노드 1대 기준</span>
                 </div>
                 <div class="form-grid resource-grid">
                   <div class="resource-field">
-                    <label for="gpu-count">GPU</label>
+                    <div class="resource-field-heading">
+                      <label for="gpu-count">GPU</label>
+                      <span id="gpu-limit-hint">최대 —</span>
+                    </div>
                     <div class="unit-input">
                       <input id="gpu-count" name="gpu-count" type="number" min="1" value="1" required>
                       <span>EA</span>
                     </div>
                   </div>
                   <div class="resource-field">
-                    <label for="cpus">CPU cores</label>
+                    <div class="resource-field-heading">
+                      <label for="cpus">CPU cores</label>
+                      <span id="cpu-limit-hint">최대 —</span>
+                    </div>
                     <div class="unit-input">
                       <input id="cpus" name="cpus" type="number" min="1" value="8" required>
                       <span>CORE</span>
                     </div>
                   </div>
                   <div class="resource-field">
-                    <label for="memory">Memory (GB)</label>
+                    <div class="resource-field-heading">
+                      <label for="memory">Memory (GB)</label>
+                      <span id="memory-limit-hint">최대 —</span>
+                    </div>
                     <div class="unit-input">
                       <input id="memory" name="memory" type="number" min="1" value="64" required>
                       <span>GB</span>
