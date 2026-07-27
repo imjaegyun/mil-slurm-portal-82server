@@ -3,6 +3,38 @@
 Machine Intelligence Lab의 82server Slurm GPU 자원을 웹에서 확인하고,
 노드별 자원 요청과 포털에서 생성한 Job 취소를 처리하는 개인 계정용 포털입니다.
 
+## 82server 접속 정보
+
+82server에서 직접 확인한 접속 정보는 다음과 같습니다.
+
+```text
+호스트명: tgm-master.hpc
+IPv4 주소: 210.125.181.82
+SSH 포트: 22
+```
+
+현재 외부 접속은 `78server`를 점프 호스트로 사용합니다. 각 사용자의
+컴퓨터에서 SSH 설정 파일에 다음 내용을 등록합니다. 사용자명과 키 경로는
+자신의 계정에 맞게 변경해야 합니다.
+
+```sshconfig
+Host 78server
+  HostName 210.125.181.78
+  Port 54329
+  User <78server 사용자명>
+  IdentityFile <개인 SSH 키 경로>
+
+Host 82server
+  HostName 210.125.181.82
+  Port 22
+  User <82server 사용자명>
+  IdentityFile <개인 SSH 키 경로>
+  ProxyJump 78server
+```
+
+랩 내부망 등에서 `210.125.181.82:22`로 직접 접속할 수 있다면
+`ProxyJump 78server`는 생략할 수 있습니다.
+
 ## 주요 기능
 
 - 파티션과 노드별 GPU, CPU, 전체/남은 메모리 확인
@@ -105,11 +137,11 @@ cd "$INSTALL_DIR"
 ./scripts/access.sh 82server
 ```
 
-`82server`는 자신의 SSH 설정에 등록한 호스트 별칭입니다. 별칭이 없다면
-`사용자명@서버주소`를 전달합니다.
+`82server`는 위 SSH 설정에 등록한 호스트 별칭입니다. 82server에 직접
+접속할 수 있어 별칭을 사용하지 않는다면 실제 주소를 전달합니다.
 
 ```bash
-./scripts/access.sh 사용자명@서버주소
+./scripts/access.sh 사용자명@210.125.181.82
 ```
 
 출력된 SSH 명령을 자신의 컴퓨터 새 터미널에서 실행한 채로 유지합니다.
