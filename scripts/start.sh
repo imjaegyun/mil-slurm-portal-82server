@@ -6,6 +6,10 @@ STATE="$ROOT/.state"
 PID_FILE="$STATE/server.pid"
 LOG_FILE="$STATE/server.log"
 
+if [[ ! -f "$ROOT/.env" ]]; then
+  "$ROOT/scripts/setup.sh"
+fi
+
 if [[ -f "$ROOT/.env" ]]; then
   set -a
   source "$ROOT/.env"
@@ -35,3 +39,4 @@ if ! kill -0 "$portal_pid" 2>/dev/null; then
 fi
 
 echo "MIL Compute Portal started on 127.0.0.1:$PORTAL_PORT (PID $portal_pid)."
+echo "Run $ROOT/scripts/access.sh 82server for your tunnel command."

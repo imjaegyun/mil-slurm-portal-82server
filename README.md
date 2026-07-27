@@ -16,17 +16,30 @@ Machine Intelligence Lab의 82server Slurm GPU 자원을 웹에서 확인하고,
 
 ## 처음 설치
 
-82server에 접속한 뒤 저장소를 복제합니다.
+각 사용자가 자신의 82server 계정으로 접속한 뒤 원하는 디렉터리에
+저장소를 복제합니다. 82server에서는 GitHub SSH 포트가 차단될 수 있으므로
+HTTPS 주소를 사용합니다.
 
 ```bash
-ssh -F ~/.ssh/config 82server
-git clone git@github.com:imjaegyun/mil-slurm-portal-82server.git ~/slurm-portal
-cd ~/slurm-portal
-cp .env.example .env
+ssh 82server
+
+INSTALL_DIR="$HOME/apps/mil-slurm-portal-82server"
+git clone \
+  https://github.com/imjaegyun/mil-slurm-portal-82server.git \
+  "$INSTALL_DIR"
+
+cd "$INSTALL_DIR"
+./scripts/setup.sh
 ```
 
-이미 `~/slurm-portal` 디렉터리가 있다면 다시 복제하지 않고 아래의
-`실행` 절차부터 진행하면 됩니다.
+`setup.sh`는 설치 디렉터리를 자동으로 인식하고 다음 작업을 처리합니다.
+
+- 사용자 UID를 기준으로 충돌하지 않는 개인용 서버 포트 선택
+- 개인 `.env` 생성
+- `~/.local/bin/mil-jobs` 연결
+- 정확한 실행·접속 명령 안내
+
+이미 설치했다면 다시 복제하지 않고 기존 디렉터리에서 실행하면 됩니다.
 
 ## 설정
 
@@ -38,10 +51,12 @@ PORTAL_SERVER_NAME=82server
 PORTAL_CLUSTER_NAME=tgmv2
 PORTAL_ALLOWED_PARTITIONS=g1,g2,g3
 PORTAL_MAX_REQUEST_NODES=32
-PORTAL_PORT=18765
+PORTAL_PORT=<사용자별 자동 선택>
 ```
 
-필요한 경우 Git에 포함되지 않는 `.env` 파일만 수정합니다.
+각 사용자의 서버 포트와 접근 토큰은 서로 다릅니다. 기존 `.env`가 있으면
+`setup.sh`가 덮어쓰지 않습니다. 필요한 경우 Git에 포함되지 않는 `.env`
+파일만 수정합니다.
 
 ## 다중 노드 요청
 
@@ -54,7 +69,7 @@ PORTAL_PORT=18765
 ## 실행
 
 ```bash
-cd ~/slurm-portal
+cd "$INSTALL_DIR"
 ./scripts/start.sh
 ./scripts/status.sh
 ./scripts/token.sh
@@ -65,13 +80,8 @@ cd ~/slurm-portal
 
 ## 터미널 GPU 현황
 
-한 번만 연결하면 어느 디렉터리에서든 `mil-jobs`를 실행할 수 있습니다.
-
-```bash
-mkdir -p ~/.local/bin
-ln -sfn ~/slurm-portal/scripts/mil-jobs ~/.local/bin/mil-jobs
-export PATH="$HOME/.local/bin:$PATH"
-```
+`setup.sh`가 `~/.local/bin/mil-jobs`를 자동으로 연결하므로 어느
+디렉터리에서든 실행할 수 있습니다.
 
 ```bash
 mil-jobs                 # 현재 GPU를 사용하는 노드
@@ -87,22 +97,48 @@ GPU 요청 수, 경과·남은 시간을 조회합니다. 자원을 변경하거
 
 ## 접속
 
-새 터미널에서 SSH 터널을 실행한 채로 유지합니다.
+서버에서 아래 명령을 실행하면 현재 사용자의 실제 서버 포트에 맞는
+SSH 터널 명령이 출력됩니다.
 
 ```bash
-ssh -F ~/.ssh/config -N \
-  -L 127.0.0.1:18765:127.0.0.1:18765 \
-  82server
+cd "$INSTALL_DIR"
+./scripts/access.sh 82server
 ```
 
-브라우저에서 <http://127.0.0.1:18765>를 열고 서버에서 확인한 토큰을
-입력합니다.
+`82server`는 자신의 SSH 설정에 등록한 호스트 별칭입니다. 별칭이 없다면
+`사용자명@서버주소`를 전달합니다.
+
+```bash
+./scripts/access.sh 사용자명@서버주소
+```
+
+출력된 SSH 명령을 자신의 컴퓨터 새 터미널에서 실행한 채로 유지합니다.
+이 명령은 macOS/Linux의 Terminal과 Windows의 PowerShell 또는 명령
+프롬프트에서 동일하게 사용할 수 있습니다.
+
+```text
+ssh -N -L 127.0.0.1:18765:127.0.0.1:<개인 서버 포트> 82server
+```
+
+SSH 호스트 설정 파일의 기본 위치는 다음과 같습니다.
+
+- macOS/Linux: `~/.ssh/config`
+- Windows: `%USERPROFILE%\.ssh\config`
+
+Windows에서 `ssh` 명령을 찾을 수 없다는 메시지가 나오면 Windows
+OpenSSH Client를 먼저 활성화해야 합니다.
+
+모든 사용자는 자신의 컴퓨터에서 <http://127.0.0.1:18765>를 열지만,
+SSH 터널의 원격 포트는 각자의 개인 포털로 연결됩니다.
+
+다른 사람의 토큰을 공유하거나 다른 사람의 포털을 함께 사용하지 마세요.
+Job 제출과 취소는 포털 프로세스를 실행한 Unix 계정 권한으로 처리됩니다.
 
 ## 업데이트
 
 ```bash
-cd ~/slurm-portal
-git pull --ff-only
+cd "$INSTALL_DIR"
+git pull --ff-only origin main
 ./scripts/stop.sh
 ./scripts/start.sh
 ```
@@ -128,8 +164,10 @@ python3 -m unittest discover -s tests -v
 
 ## 보안 범위
 
-- 웹 서버는 외부 인터페이스가 아닌 `127.0.0.1:18765`에만 바인딩됩니다.
+- 웹 서버는 외부 인터페이스가 아닌 사용자별 `127.0.0.1:<개인 포트>`에만
+  바인딩됩니다.
 - API는 `.state/access-token`의 랜덤 토큰을 요구합니다.
+- 각 사용자는 자신의 Unix 계정에서 별도 포털·포트·토큰을 사용합니다.
 - Slurm 명령은 셸 문자열이 아닌 인자 배열로 실행됩니다.
 - Job 취소는 포털이 만든 현재 사용자 소유 Job에만 허용됩니다.
 - `.env`, 접근 토큰, PID, 로그는 `.gitignore`로 제외됩니다.
