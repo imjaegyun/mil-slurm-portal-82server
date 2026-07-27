@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from slurm_portal.mil_jobs import (
+    _duration_short,
     _expand_nodelist,
     collect_snapshot,
     render_snapshot,
@@ -41,6 +42,11 @@ class FakeRunner:
 
 
 class MilJobsTests(unittest.TestCase):
+    def test_formats_slurm_durations_for_terminal(self):
+        self.assertEqual(_duration_short("1-12:32:29"), "1d 12h")
+        self.assertEqual(_duration_short("03:50:00"), "3h 50m")
+        self.assertEqual(_duration_short("UNLIMITED"), "∞")
+
     def test_expand_nodelist(self):
         self.assertEqual(
             _expand_nodelist("n[072-074,080]"),
@@ -80,6 +86,8 @@ class MilJobsTests(unittest.TestCase):
         self.assertIn("alice", output)
         self.assertIn("A6000 ×2", output)
         self.assertIn("idx 4,5", output)
+        self.assertIn("JOB ID", output)
+        self.assertIn("▼ G2", output)
 
         all_output = render_snapshot(
             snapshot,

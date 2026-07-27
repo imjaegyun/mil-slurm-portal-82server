@@ -255,13 +255,48 @@ class Palette:
     def amber(self, value: object) -> str:
         return self.paint("38;5;215", value)
 
+    def red(self, value: object) -> str:
+        return self.paint("38;5;203", value)
+
     def muted(self, value: object) -> str:
         return self.paint("38;5;245", value)
 
 
-def _bar(used: int, total: int, width: int = 10) -> str:
-    filled = 0 if total < 1 else min(width, round((used / total) * width))
-    return "█" * filled + "░" * (width - filled)
+def _gpu_slots(used: int, total: int, palette: Palette) -> str:
+    used = min(max(0, used), max(0, total))
+    return palette.amber("●" * used) + palette.muted("○" * (total - used))
+
+
+def _duration_short(value: object) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"N/A", "None", "Unknown"}:
+        return "—"
+    if text.upper() in {"UNLIMITED", "INFINITE"}:
+        return "∞"
+    days = 0
+    clock = text
+    if "-" in text:
+        day_text, clock = text.split("-", 1)
+        if day_text.isdigit():
+            days = int(day_text)
+    parts = clock.split(":")
+    try:
+        if len(parts) == 3:
+            hours, minutes, seconds = (int(part) for part in parts)
+        elif len(parts) == 2:
+            hours = 0
+            minutes, seconds = (int(part) for part in parts)
+        else:
+            return text
+    except ValueError:
+        return text
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m"
+    return f"{seconds}s"
 
 
 def _clip(value: object, width: int) -> str:
@@ -301,6 +336,7 @@ def render_snapshot(
     width = terminal_width or shutil.get_terminal_size((110, 24)).columns
     width = max(78, min(150, width))
     all_jobs = [job for _, jobs in visible for job in jobs]
+    unique_jobs = {(job["id"], job["user"]) for job in all_jobs}
     users = {job["user"] for job in all_jobs}
     gpu_used = sum(node["gpu_used"] for node, _ in visible)
     gpu_total = sum(node["gpu_total"] for node, _ in visible)
@@ -309,12 +345,17 @@ def render_snapshot(
         palette.bold(
             f"Machine Intelligence Lab · {server_name} · {cluster_name}"
         ),
+        palette.muted(f"UPDATED {generated}"),
         (
-            f"{palette.blue(f'{gpu_used}/{gpu_total} GPUs')}  "
-            f"{len(visible)} nodes  {len(all_jobs)} jobs  {len(users)} users  "
-            f"{palette.muted(generated)}"
+            f"{palette.amber(f'{gpu_used}/{gpu_total} GPU USED')}   "
+            f"{palette.blue(f'{len(visible)} ACTIVE NODES')}   "
+            f"{len(unique_jobs)} JOBS   {len(users)} USERS"
         ),
-        palette.muted("─" * width),
+        palette.muted("━" * width),
+        (
+            f"{palette.amber('●')} 사용 중  {palette.muted('○')} 사용 가능"
+            "   ·   GPU는 노드 전체 사용량, Job 행은 사용자별 요청량"
+        ),
     ]
 
     if not visible:
@@ -332,63 +373,95 @@ def render_snapshot(
     for node, jobs in visible:
         if node["partition"] != current_partition:
             current_partition = node["partition"]
-            partition_nodes = sum(
-                1 for item, _ in visible if item["partition"] == current_partition
-            )
+            partition_rows = [
+                (item, item_jobs)
+                for item, item_jobs in visible
+                if item["partition"] == current_partition
+            ]
+            partition_nodes = len(partition_rows)
+            partition_gpu_used = sum(item["gpu_used"] for item, _ in partition_rows)
+            partition_gpu_total = sum(item["gpu_total"] for item, _ in partition_rows)
+            partition_users = {
+                job["user"] for _, item_jobs in partition_rows for job in item_jobs
+            }
             lines.extend(
                 [
                     "",
-                    palette.blue(
-                        f"[{current_partition}] {partition_nodes} node"
-                        f"{'s' if partition_nodes != 1 else ''}"
+                    palette.blue(f"▼ {current_partition.upper()}"),
+                    palette.muted(
+                        f"  {partition_gpu_used}/{partition_gpu_total} GPU 사용 · "
+                        f"{partition_nodes}개 노드 · {len(partition_users)}명"
                     ),
                 ]
             )
         state = node["state"].upper()
-        state_label = (
-            palette.green(f"{state:<6}")
-            if state in {"IDLE", "MIX"}
-            else palette.amber(f"{state:<6}")
-        )
+        state_field = f"[{state:^5}]"
+        if state == "IDLE":
+            state_label = palette.green(state_field)
+        elif state == "MIX":
+            state_label = palette.blue(state_field)
+        elif state in {"ALLOC"}:
+            state_label = palette.amber(state_field)
+        else:
+            state_label = palette.red(state_field)
         gpu_label = (node["gpu_type"] or "gpu").upper()
         slots = (
             " idx " + ",".join(str(index) for index in node["gpu_indices"])
             if node["gpu_indices"]
             else ""
         )
-        memory = (
-            f"MEM free {node['memory_free_gb']}/{node['memory_total_gb']}G"
-        )
         node_name_label = palette.bold(f"{node['name']:<8}")
         lines.append(
-            f"{node_name_label} {state_label} "
-            f"GPU {_bar(node['gpu_used'], node['gpu_total'])} "
-            f"{node['gpu_used']}/{node['gpu_total']} {gpu_label}{slots}  "
-            f"CPU {node['cpu_used']}/{node['cpu_total']}  {memory}"
+            f"┌ {node_name_label} {state_label}  {gpu_label:<10} "
+            f"GPU {_gpu_slots(node['gpu_used'], node['gpu_total'], palette)}  "
+            f"{node['gpu_used']}/{node['gpu_total']}"
+        )
+        lines.append(
+            f"│ CPU {node['cpu_used']}/{node['cpu_total']}  ·  "
+            f"MEMORY 여유 {node['memory_free_gb']}/{node['memory_total_gb']} GB"
+            f"{slots}"
         )
         if not jobs:
             lines.append(
-                "  "
+                "├─ "
                 + palette.muted(
-                    "GPU allocation exists, but matching squeue details were not found."
+                    "GPU 사용은 감지됐지만 squeue에서 사용자 Job을 찾지 못했습니다."
                 )
             )
+            lines.append(palette.muted("└" + "─" * min(width - 1, 96)))
             continue
+        lines.append(
+            palette.muted(
+                "│ JOB ID     USER            GPU          경과       남음       NAME"
+            )
+        )
         for job in jobs:
             job_gpu = (job["gpu_type"] or node["gpu_type"] or "gpu").upper()
-            name_width = max(12, width - 72)
+            gpu_request = f"{job_gpu} ×{job['gpu_count']}"
+            name_width = max(12, width - 68)
             job_id_label = palette.muted(f"#{job['id']:<9}")
             job_user_label = palette.bold(
                 f"{_clip(job['user'], 14):<14}"
             )
             lines.append(
-                "  "
+                "├─ "
                 f"{job_id_label} "
                 f"{job_user_label} "
-                f"{job_gpu} ×{job['gpu_count']:<2}  "
-                f"{job['elapsed']:>10} / {_clip(job['remaining'], 10):<10}  "
+                f"{gpu_request:<12} "
+                f"{_duration_short(job['elapsed']):>8}  "
+                f"{_duration_short(job['remaining']):>8}  "
                 f"{_clip(job['name'], name_width)}"
             )
+        lines.append(palette.muted("└" + "─" * min(width - 1, 96)))
+    lines.extend(
+        [
+            "",
+            palette.muted(
+                "TIP  mil-jobs --watch  실시간 갱신 · --all  유휴 노드 포함 · "
+                "--user $USER  내 Job만"
+            ),
+        ]
+    )
     return "\n".join(lines)
 
 
