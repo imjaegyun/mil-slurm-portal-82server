@@ -11,6 +11,7 @@ Machine Intelligence Lab의 82server Slurm GPU 자원을 웹에서 확인하고,
 - 현재 여유 모드는 남은 GPU·CPU·메모리까지만 허용하고, 대기 요청은 노드 수용량 안에서 허용
 - 실행 시간 제한 없음(`No limit`) 지원
 - 포털에서 생성한 현재 사용자 소유 Job 취소
+- `mil-jobs` 터미널 화면에서 사용 중인 GPU 노드, 사용자와 Job 확인
 - 시스템 설정에 따른 라이트/다크 모드 자동 전환
 
 ## 처음 설치
@@ -61,6 +62,28 @@ cd ~/slurm-portal
 
 `token.sh`가 출력한 접근 토큰은 브라우저 로그인 화면에 입력합니다.
 토큰은 서버의 `.state/access-token`에만 저장되며 Git에는 올라가지 않습니다.
+
+## 터미널 GPU 현황
+
+한 번만 연결하면 어느 디렉터리에서든 `mil-jobs`를 실행할 수 있습니다.
+
+```bash
+mkdir -p ~/.local/bin
+ln -sfn ~/slurm-portal/scripts/mil-jobs ~/.local/bin/mil-jobs
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+```bash
+mil-jobs                 # 현재 GPU를 사용하는 노드
+mil-jobs --watch         # 5초마다 자동 갱신
+mil-jobs --all           # 유휴 GPU 노드까지 모두 표시
+mil-jobs --user "$USER"  # 내 Job만 표시
+mil-jobs --partition g2  # 특정 파티션만 표시
+```
+
+노드별 GPU 사용량과 인덱스, CPU, 남은 메모리, Job ID, 사용자,
+GPU 요청 수, 경과·남은 시간을 조회합니다. 자원을 변경하거나 Job을
+제출·취소하지 않는 읽기 전용 명령입니다.
 
 ## 접속
 
