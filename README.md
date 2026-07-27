@@ -3,38 +3,6 @@
 Machine Intelligence Lab의 82server Slurm GPU 자원을 웹에서 확인하고,
 노드별 자원 요청과 포털에서 생성한 Job 취소를 처리하는 개인 계정용 포털입니다.
 
-## 82server 접속 정보
-
-82server에서 직접 확인한 접속 정보는 다음과 같습니다.
-
-```text
-호스트명: tgm-master.hpc
-IPv4 주소: 210.125.181.82
-SSH 포트: 22
-```
-
-현재 외부 접속은 `78server`를 점프 호스트로 사용합니다. 각 사용자의
-컴퓨터에서 SSH 설정 파일에 다음 내용을 등록합니다. 사용자명과 키 경로는
-자신의 계정에 맞게 변경해야 합니다.
-
-```sshconfig
-Host 78server
-  HostName 210.125.181.78
-  Port 54329
-  User <78server 사용자명>
-  IdentityFile <개인 SSH 키 경로>
-
-Host 82server
-  HostName 210.125.181.82
-  Port 22
-  User <82server 사용자명>
-  IdentityFile <개인 SSH 키 경로>
-  ProxyJump 78server
-```
-
-랩 내부망 등에서 `210.125.181.82:22`로 직접 접속할 수 있다면
-`ProxyJump 78server`는 생략할 수 있습니다.
-
 ## 주요 기능
 
 - 파티션과 노드별 GPU, CPU, 전체/남은 메모리 확인
@@ -53,7 +21,7 @@ Host 82server
 HTTPS 주소를 사용합니다.
 
 ```bash
-ssh 82server
+ssh USERNAME@210.125.181.82
 
 INSTALL_DIR="$HOME/apps/mil-slurm-portal-82server"
 git clone \
@@ -63,6 +31,8 @@ git clone \
 cd "$INSTALL_DIR"
 ./scripts/setup.sh
 ```
+
+`USERNAME`은 자신의 82server 계정명으로 변경합니다.
 
 `setup.sh`는 설치 디렉터리를 자동으로 인식하고 다음 작업을 처리합니다.
 
@@ -134,14 +104,7 @@ SSH 터널 명령이 출력됩니다.
 
 ```bash
 cd "$INSTALL_DIR"
-./scripts/access.sh 82server
-```
-
-`82server`는 위 SSH 설정에 등록한 호스트 별칭입니다. 82server에 직접
-접속할 수 있어 별칭을 사용하지 않는다면 실제 주소를 전달합니다.
-
-```bash
-./scripts/access.sh 사용자명@210.125.181.82
+./scripts/access.sh
 ```
 
 출력된 SSH 명령을 자신의 컴퓨터 새 터미널에서 실행한 채로 유지합니다.
@@ -149,13 +112,8 @@ cd "$INSTALL_DIR"
 프롬프트에서 동일하게 사용할 수 있습니다.
 
 ```text
-ssh -N -L 127.0.0.1:18765:127.0.0.1:<개인 서버 포트> 82server
+ssh -N -L 127.0.0.1:18765:127.0.0.1:<개인 서버 포트> USERNAME@210.125.181.82
 ```
-
-SSH 호스트 설정 파일의 기본 위치는 다음과 같습니다.
-
-- macOS/Linux: `~/.ssh/config`
-- Windows: `%USERPROFILE%\.ssh\config`
 
 Windows에서 `ssh` 명령을 찾을 수 없다는 메시지가 나오면 Windows
 OpenSSH Client를 먼저 활성화해야 합니다.
@@ -167,7 +125,7 @@ SSH 터널의 원격 포트는 각자의 개인 포털로 연결됩니다.
 다른 로컬 포트를 지정합니다.
 
 ```bash
-./scripts/access.sh 82server 18766
+./scripts/access.sh 18766
 ```
 
 출력된 명령을 실행한 뒤 <http://127.0.0.1:18766>으로 접속하면 됩니다.

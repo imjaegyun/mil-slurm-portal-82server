@@ -12,8 +12,15 @@ source "$ROOT/.env"
 set +a
 
 remote_port="${PORTAL_PORT:-18765}"
-ssh_host="${1:-82server}"
-local_port="${2:-18765}"
+portal_user="${USER:-$(id -un)}"
+ssh_host="${portal_user}@210.125.181.82"
+local_port="18765"
+if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+  local_port="$1"
+else
+  ssh_host="${1:-$ssh_host}"
+  local_port="${2:-$local_port}"
+fi
 if [[ ! "$remote_port" =~ ^[0-9]+$ ]] || [[ ! "$local_port" =~ ^[0-9]+$ ]]; then
   echo "Portal ports must be numeric." >&2
   exit 1
@@ -33,7 +40,4 @@ echo "   ssh -N -L 127.0.0.1:${local_port}:127.0.0.1:${remote_port} ${ssh_host}"
 echo
 echo "3. Open http://127.0.0.1:${local_port}"
 echo
-echo "SSH host aliases are read automatically from:"
-echo "  macOS/Linux: ~/.ssh/config"
-echo "  Windows:     %USERPROFILE%\\.ssh\\config"
-echo "If no alias is configured, pass user@server-address instead of ${ssh_host}."
+echo "The server address is 210.125.181.82; no SSH host alias is required."

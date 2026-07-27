@@ -39,4 +39,4 @@ if ! kill -0 "$portal_pid" 2>/dev/null; then
 fi
 
 echo "MIL Compute Portal started on 127.0.0.1:$PORTAL_PORT (PID $portal_pid)."
-echo "Run $ROOT/scripts/access.sh 82server for your tunnel command."
+echo "Run $ROOT/scripts/access.sh for your tunnel command."

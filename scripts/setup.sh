@@ -88,4 +88,4 @@ echo
 echo "Next:"
 echo "  cd \"$ROOT\""
 echo "  ./scripts/start.sh"
-echo "  ./scripts/access.sh 82server"
+echo "  ./scripts/access.sh"

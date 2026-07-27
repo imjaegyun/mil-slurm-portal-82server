@@ -22,6 +22,7 @@ class SetupScriptTests(unittest.TestCase):
             environment = {
                 **os.environ,
                 "HOME": str(root / "fake home"),
+                "USER": "test-user",
                 "PORTAL_PORT_BASE": "30000",
                 "PORTAL_SKIP_CLI_LINK": "1",
                 "PORTAL_SKIP_PORT_CHECK": "1",
@@ -68,7 +69,25 @@ class SetupScriptTests(unittest.TestCase):
             )
             self.assertIn("lab-server", access.stdout)
             self.assertIn("Windows PowerShell/CMD", access.stdout)
-            self.assertIn(r"%USERPROFILE%\.ssh\config", access.stdout)
+
+            default_access = subprocess.run(
+                ["bash", str(scripts / "access.sh")],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertIn("test-user@210.125.181.82", default_access.stdout)
+
+            alternate_port = subprocess.run(
+                ["bash", str(scripts / "access.sh"), "19001"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertIn("http://127.0.0.1:19001", alternate_port.stdout)
+            self.assertIn("test-user@210.125.181.82", alternate_port.stdout)
 
 
 if __name__ == "__main__":
